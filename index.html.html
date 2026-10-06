@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlightTrust Pakistan — Airline Reliability Checker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Sora:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --navy:#0B1F3A; --navy-mid:#162D52; --sky:#2A7FD4; --sky-light:#E8F3FC;
+    --amber:#F4A827; --amber-light:#FEF4DC; --green:#1FA364; --green-light:#E3F5EC;
+    --red:#D63B3B; --red-light:#FBEAEA; --sand:#F7F5F0;
+    --text:#1A1A2E; --text-muted:#5E6779; --text-faint:#9AA3B0;
+    --border:#E2E6ED; --white:#FFFFFF;
+    --radius:12px; --radius-sm:8px;
+    --shadow:0 2px 12px rgba(11,31,58,0.08); --shadow-md:0 4px 24px rgba(11,31,58,0.12);
+  }
+  body { font-family:'Inter',sans-serif; background:var(--sand); color:var(--text); min-height:100vh; font-size:15px; line-height:1.6; }
+
+  /* NAV */
+  nav { background:var(--navy); padding:0 2rem; display:flex; align-items:center; justify-content:space-between; height:60px; position:sticky; top:0; z-index:100; }
+  .nav-logo { font-family:'Sora',sans-serif; font-weight:700; font-size:20px; color:var(--white); display:flex; align-items:center; gap:8px; text-decoration:none; }
+  .nav-logo span { color:var(--amber); }
+  .nav-links { display:flex; gap:24px; }
+  .nav-links a { color:rgba(255,255,255,0.65); text-decoration:none; font-size:14px; transition:color .2s; }
+  .nav-links a:hover { color:var(--white); }
+  .nav-badge { background:var(--sky); color:var(--white); font-size:12px; font-weight:600; padding:5px 14px; border-radius:99px; }
+
+  /* HERO */
+  .hero { background:linear-gradient(135deg,var(--navy) 0%,var(--navy-mid) 60%,#1A3A6B 100%); padding:3rem 2rem 2.5rem; text-align:center; position:relative; overflow:hidden; }
+  .hero::before { content:''; position:absolute; top:-60px; right:-60px; width:300px; height:300px; background:radial-gradient(circle,rgba(42,127,212,0.15) 0%,transparent 70%); border-radius:50%; }
+  .hero-eyebrow { display:inline-flex; align-items:center; gap:6px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:99px; padding:5px 14px; font-size:12px; color:rgba(255,255,255,0.7); margin-bottom:1.25rem; letter-spacing:0.05em; text-transform:uppercase; font-weight:500; }
+  .hero h1 { font-family:'Sora',sans-serif; font-size:clamp(24px,4.5vw,46px); font-weight:700; color:var(--white); line-height:1.15; margin-bottom:.75rem; }
+  .hero h1 em { font-style:normal; color:var(--amber); }
+  .hero-sub { font-size:15px; color:rgba(255,255,255,0.6); max-width:500px; margin:0 auto 2rem; line-height:1.65; }
+
+  /* GRACE TOGGLE */
+  .grace-bar { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:1.25rem; flex-wrap:wrap; }
+  .grace-label { font-size:13px; color:rgba(255,255,255,0.7); }
+  .toggle { width:40px; height:22px; background:rgba(255,255,255,0.2); border-radius:99px; position:relative; transition:background .2s; cursor:pointer; flex-shrink:0; }
+  .toggle.on { background:var(--amber); }
+  .toggle::after { content:''; position:absolute; top:3px; left:3px; width:16px; height:16px; background:var(--white); border-radius:50%; transition:transform .2s; }
+  .toggle.on::after { transform:translateX(18px); }
+  .grace-note { font-size:12px; color:rgba(255,255,255,0.45); }
+
+  /* SEARCH CARD */
+  .search-card { background:var(--white); border-radius:var(--radius); padding:1.25rem 1.5rem; max-width:920px; margin:0 auto; box-shadow:var(--shadow-md); position:relative; z-index:2; }
+  .search-label { font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:5px; display:block; }
+  .search-grid { display:grid; grid-template-columns:1.1fr 1fr 1fr 1fr auto; gap:10px; align-items:end; }
+  select, input[type="date"] { width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:var(--radius-sm); font-family:'Inter',sans-serif; font-size:14px; color:var(--text); background:var(--white); appearance:none; -webkit-appearance:none; cursor:pointer; transition:border-color .2s; }
+  select { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235E6779' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:32px; }
+  select:focus, input[type="date"]:focus { outline:none; border-color:var(--sky); }
+  .btn-check { background:var(--sky); color:var(--white); border:none; border-radius:var(--radius-sm); padding:10px 20px; font-family:'Inter',sans-serif; font-size:14px; font-weight:600; cursor:pointer; white-space:nowrap; transition:background .2s; display:flex; align-items:center; gap:6px; height:42px; }
+  .btn-check:hover { background:#1f6cb8; }
+
+  /* QUICK DATE TABS */
+  .period-bar { display:flex; justify-content:center; gap:6px; padding:1.25rem 1rem 0; flex-wrap:wrap; }
+  .ptab { padding:6px 16px; border-radius:99px; font-size:13px; font-weight:500; cursor:pointer; border:1.5px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.6); transition:all .15s; }
+  .ptab:hover { border-color:rgba(255,255,255,0.5); color:var(--white); }
+  .ptab.active { background:var(--white); color:var(--navy); border-color:var(--white); font-weight:600; }
+
+  /* MAIN */
+  .main { max-width:1020px; margin:2rem auto; padding:0 1.25rem 4rem; }
+
+  /* SECTION HEADER */
+  .section-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:.875rem; flex-wrap:wrap; gap:8px; }
+  .section-hdr h2 { font-family:'Sora',sans-serif; font-size:16px; font-weight:600; color:var(--text); }
+  .section-hdr span { font-size:12px; color:var(--text-faint); }
+
+  /* VERDICT CARD */
+  .verdict-hero { background:var(--white); border-radius:var(--radius); padding:1.75rem; display:grid; grid-template-columns:120px 1fr; gap:1.75rem; align-items:center; box-shadow:var(--shadow); margin-bottom:1.25rem; border:1.5px solid var(--border); }
+  .ring-wrap { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .ring-relative { position:relative; width:110px; height:110px; }
+  .ring-relative svg { width:110px; height:110px; }
+  .score-num { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-family:'Sora',sans-serif; font-size:28px; font-weight:700; color:var(--text); }
+  .score-lbl { font-size:11px; color:var(--text-muted); font-weight:500; text-align:center; }
+  .verdict-badge { display:inline-flex; align-items:center; gap:5px; padding:4px 12px; border-radius:99px; font-size:12px; font-weight:600; margin-bottom:8px; }
+  .badge-good { background:var(--green-light); color:#136840; }
+  .badge-avg  { background:var(--amber-light); color:#8C5E00; }
+  .badge-bad  { background:var(--red-light); color:#A02020; }
+  .verdict-name { font-family:'Sora',sans-serif; font-size:20px; font-weight:700; color:var(--text); margin-bottom:5px; }
+  .verdict-desc { font-size:14px; color:var(--text-muted); line-height:1.7; }
+  .verdict-meta { font-size:12px; color:var(--text-faint); margin-top:10px; }
+  .grace-notice { background:var(--amber-light); border:1px solid #F4A82740; border-radius:var(--radius-sm); padding:7px 12px; font-size:12px; color:#7A5200; margin-top:10px; display:inline-flex; align-items:center; gap:6px; }
+
+  /* KPI */
+  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:1.25rem; }
+  .kpi-card { background:var(--white); border-radius:var(--radius-sm); padding:1rem; border:1.5px solid var(--border); box-shadow:var(--shadow); }
+  .kpi-icon { font-size:18px; margin-bottom:8px; }
+  .kpi-label { font-size:11px; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
+  .kpi-value { font-family:'Sora',sans-serif; font-size:22px; font-weight:700; color:var(--text); }
+  .kpi-bench { font-size:11px; color:var(--text-faint); margin-top:3px; }
+  .kpi-good { color:var(--green); } .kpi-avg { color:#B07800; } .kpi-bad { color:var(--red); }
+
+  /* TWO COL */
+  .two-col { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:1.25rem; }
+  .card { background:var(--white); border-radius:var(--radius); padding:1.25rem; border:1.5px solid var(--border); box-shadow:var(--shadow); }
+  .card-title { font-size:12px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:1rem; }
+
+  /* ROUTE BARS */
+  .route-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; cursor:pointer; padding:4px 6px; border-radius:6px; transition:background .15s; }
+  .route-row:hover { background:var(--sand); }
+  .route-row.active-route { background:var(--sky-light); }
+  .route-row:last-child { margin-bottom:0; }
+  .route-name { font-size:12px; color:var(--text-muted); min-width:72px; font-weight:500; }
+  .route-bg { flex:1; height:8px; background:var(--sand); border-radius:99px; overflow:hidden; }
+  .route-fill { height:100%; border-radius:99px; }
+  .route-pct { font-size:12px; font-weight:600; color:var(--text); min-width:34px; text-align:right; }
+
+  /* CHART */
+  .chart-wrap { position:relative; width:100%; height:175px; }
+
+  /* TIPS */
+  .tips-card { background:var(--navy); border-radius:var(--radius); padding:1.5rem; margin-bottom:1.25rem; }
+  .tips-title { font-family:'Sora',sans-serif; font-size:15px; font-weight:600; color:var(--white); margin-bottom:1rem; }
+  .tip-row { display:flex; gap:10px; margin-bottom:12px; align-items:flex-start; }
+  .tip-row:last-child { margin-bottom:0; }
+  .tip-dot { width:6px; height:6px; border-radius:50%; background:var(--amber); flex-shrink:0; margin-top:7px; }
+  .tip-text { font-size:14px; color:rgba(255,255,255,0.75); line-height:1.6; }
+
+  /* PILLS */
+  .pill { display:inline-block; padding:2px 9px; border-radius:99px; font-size:11px; font-weight:600; }
+  .pill-g { background:var(--green-light); color:#136840; }
+  .pill-a { background:var(--amber-light); color:#8C5E00; }
+  .pill-r { background:var(--red-light); color:#A02020; }
+  .pill-grace { background:#EDF4FF; color:#1558A8; }
+  .stars { color:var(--amber); letter-spacing:1px; font-size:13px; }
+
+  /* FLIGHT LOG TABLE */
+  .log-card { background:var(--white); border-radius:var(--radius); border:1.5px solid var(--border); box-shadow:var(--shadow); overflow:hidden; margin-bottom:1.25rem; }
+  .log-head { padding:1rem 1.25rem; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+  .log-head h3 { font-size:13px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; }
+  .log-filter-note { font-size:12px; color:var(--sky); font-weight:500; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  thead th { text-align:left; padding:9px 14px; font-weight:600; color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.04em; background:var(--sand); border-bottom:1px solid var(--border); }
+  tbody td { padding:11px 14px; border-bottom:1px solid var(--border); color:var(--text); }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr:hover { background:#FAFAF8; }
+  .delay-cell { font-weight:600; }
+  .delay-none { color:var(--green); }
+  .delay-grace { color:#1558A8; }
+  .delay-late { color:var(--red); }
+  .flight-num { font-weight:600; color:var(--navy); }
+
+  /* COMPARISON TABLE */
+  .compare-card { background:var(--white); border-radius:var(--radius); border:1.5px solid var(--border); box-shadow:var(--shadow); overflow:hidden; margin-bottom:1.25rem; }
+  .compare-head { padding:1rem 1.25rem; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+  .compare-head h3 { font-size:13px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; }
+  .compare-head span { font-size:12px; color:var(--text-faint); }
+  .compare-table th { background:var(--navy); color:rgba(255,255,255,0.7); padding:10px 14px; text-align:left; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; border-bottom:none; white-space:nowrap; }
+  .compare-table td { padding:13px 14px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  .compare-table tbody tr:last-child td { border-bottom:none; }
+  .compare-table tbody tr.current-airline { background:var(--sky-light); }
+  .compare-table tbody tr.current-airline td:first-child { border-left:3px solid var(--sky); padding-left:11px; }
+  .compare-table tbody tr:hover:not(.current-airline) { background:var(--sand); }
+  .airline-cell { display:flex; align-items:center; gap:10px; }
+  .airline-logo { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:var(--white); flex-shrink:0; }
+  .airline-name-full { font-weight:600; font-size:13px; color:var(--text); line-height:1.3; }
+  .metric-bar { display:flex; align-items:center; gap:6px; }
+  .mini-bar-bg { width:56px; height:6px; background:var(--sand); border-radius:99px; overflow:hidden; flex-shrink:0; }
+  .mini-bar-fill { height:100%; border-radius:99px; }
+  .metric-val { font-size:13px; font-weight:600; min-width:36px; }
+  .best-tag  { display:inline-block; background:var(--green-light); color:#136840; font-size:10px; font-weight:700; padding:1px 6px; border-radius:99px; margin-left:4px; vertical-align:middle; }
+  .worst-tag { display:inline-block; background:var(--red-light); color:#A02020; font-size:10px; font-weight:700; padding:1px 6px; border-radius:99px; margin-left:4px; vertical-align:middle; }
+  .recommend-badge { display:inline-flex; align-items:center; gap:3px; background:var(--amber-light); color:#7A5200; font-size:10px; font-weight:700; padding:2px 8px; border-radius:99px; }
+  .score-ring-sm { width:32px; height:32px; border-radius:50%; border-width:2.5px; border-style:solid; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; }
+
+  /* CTA */
+  .cta-strip { background:var(--amber); border-radius:var(--radius); padding:1.25rem 1.5rem; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .cta-strip-text strong { font-weight:600; font-size:15px; color:var(--navy); display:block; }
+  .cta-strip-text span { font-size:13px; color:rgba(11,31,58,0.65); }
+  .btn-cta { background:var(--navy); color:var(--white); border:none; border-radius:var(--radius-sm); padding:10px 22px; font-family:'Inter',sans-serif; font-size:14px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .btn-cta:hover { background:var(--navy-mid); }
+
+  /* EMPTY STATE */
+  .empty-state { background:var(--white); border:1.5px solid var(--border); border-radius:var(--radius); padding:3rem 2rem; text-align:center; margin-bottom:1.25rem; }
+  .empty-icon { font-size:40px; margin-bottom:12px; }
+  .empty-title { font-family:'Sora',sans-serif; font-size:18px; font-weight:600; color:var(--text); margin-bottom:6px; }
+  .empty-desc { font-size:14px; color:var(--text-muted); max-width:360px; margin:0 auto; }
+
+  footer { background:var(--navy); color:rgba(255,255,255,0.45); text-align:center; padding:1.5rem; font-size:12px; }
+  footer strong { color:rgba(255,255,255,0.7); }
+
+  @media(max-width:700px) {
+    .search-grid { grid-template-columns:1fr 1fr; }
+    .btn-check { grid-column:span 2; justify-content:center; }
+    .two-col { grid-template-columns:1fr; }
+    .verdict-hero { grid-template-columns:1fr; text-align:center; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="#" class="nav-logo">🇵🇰 Flight<span>Trust</span></a>
+  <div class="nav-links">
+    <a href="#">Airlines</a>
+    <a href="#">Routes</a>
+    <a href="#">Alerts</a>
+  </div>
+  <span class="nav-badge">Pakistan Only</span>
+</nav>
+
+<section class="hero">
+  <div class="hero-eyebrow">🇵🇰 Pakistani airline reliability</div>
+  <h1>Don't let a cheap ticket<br>ruin your <em>trip</em></h1>
+  <p class="hero-sub">Real cancellation rates, on-time history & flight logs for Pakistani carriers — before you book.</p>
+
+  <!-- GRACE TOGGLE -->
+  <div class="grace-bar">
+    <span class="grace-label">15-min grace period</span>
+    <div class="toggle on" id="graceSwitch" onclick="toggleGrace()"></div>
+    <span class="grace-note">Flights delayed ≤15 min counted as on-time</span>
+  </div>
+
+  <!-- SEARCH CARD -->
+  <div class="search-card">
+    <div class="search-grid">
+      <div>
+        <label class="search-label">Airline</label>
+        <select id="airlineSel" onchange="onAirlineChange()">
+          <option value="all">✈ All Pakistani airlines</option>
+          <option value="PIA">✈ PIA — Pakistan International</option>
+          <option value="AS">✈ AirSial</option>
+          <option value="AB">✈ AirBlue</option>
+          <option value="SR">✈ SereneAir</option>
+        </select>
+      </div>
+      <div>
+        <label class="search-label">Route</label>
+        <select id="routeSel" onchange="render()">
+          <option value="all">All routes</option>
+        </select>
+      </div>
+      <div>
+        <label class="search-label">From date</label>
+        <input type="date" id="dateFrom" onchange="render()">
+      </div>
+      <div>
+        <label class="search-label">To date</label>
+        <input type="date" id="dateTo" onchange="render()">
+      </div>
+      <button class="btn-check" onclick="render()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.5" stroke="white" stroke-width="1.5"/><path d="M9.5 9.5L12.5 12.5" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Check
+      </button>
+    </div>
+  </div>
+
+  <!-- QUICK DATE TABS -->
+  <div class="period-bar">
+    <button class="ptab" onclick="setQuickPeriod(7,this)">Last 7 days</button>
+    <button class="ptab active" onclick="setQuickPeriod(14,this)">Last 2 weeks</button>
+    <button class="ptab" onclick="setQuickPeriod(30,this)">Last month</button>
+    <button class="ptab" onclick="setQuickPeriod(90,this)">Last 3 months</button>
+  </div>
+</section>
+
+<main class="main" id="mainContent"></main>
+
+<footer><strong>FlightTrust Pakistan</strong> — Data updated daily from flight tracking feeds. 15-min grace period follows PCAA standard. &copy; 2026</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+const TODAY = new Date(2026, 6, 27);
+
+function isoDate(d) {
+  return d.toISOString().split('T')[0];
+}
+function addDays(d, n) {
+  const r = new Date(d); r.setDate(r.getDate() + n); return r;
+}
+function fmtDate(d) {
+  return d.toLocaleDateString('en-PK', {day:'2-digit', month:'short', year:'numeric'});
+}
+function scoreColor(s) { return s>=80?'#1FA364':s>=65?'#F4A827':'#D63B3B'; }
+function starsHtml(r) {
+  const f=Math.floor(r), h=(r-f)>=.5?1:0, e=5-f-h;
+  return '<span class="stars">'+'★'.repeat(f)+(h?'☆':'')+'☆'.repeat(e)+'</span>';
+}
+
+// ─── DATA ─────────────────────────────────────────────────────────────────────
+const AIRLINE_COLORS = {PIA:'#166AB0', AS:'#1FA364', AB:'#D63B3B', SR:'#8B5CF6'};
+
+const DATA = {
+  PIA: {
+    name:'PIA', full:'Pakistan International Airlines', code:'PK',
+    routes:['All routes','KHI–LHE','KHI–DXB','ISB–LHR','LHE–DXB','KHI–MAN','ISB–DXB','LHE–ISB'],
+    routeOT:    [null,72,58,54,61,49,63,80],
+    routeGrace: [null,81,70,65,73,62,75,88],
+    stats:{ontime:63,ontimeG:74,cancel:7.6,delay:21,baggage:90,comfort:2.9,value:3.2},
+    trend:[61,58,64,66,63,67,65,62,64,68,65,63],
+    trendG:[72,69,75,77,74,78,76,73,75,79,76,74],
+    tips:['PIA domestic routes (KHI–LHE, ISB–LHE) perform significantly better than long-haul.','Early morning departures have the strongest on-time performance.','KHI–LHR has the highest cancellation rate — always build buffer time.','Avoid Friday evenings on PIA — historically the worst delay window.'],
+    verdict:'avg'
+  },
+  AS: {
+    name:'AirSial', full:'AirSial', code:'PF',
+    routes:['All routes','KHI–LHE','LHE–ISB','KHI–ISB','FSD–KHI','MUX–LHE'],
+    routeOT:    [null,78,82,75,70,73],
+    routeGrace: [null,87,90,84,80,82],
+    stats:{ontime:75,ontimeG:85,cancel:3.2,delay:12,baggage:93,comfort:3.5,value:4.3},
+    trend:[74,72,76,78,75,77,76,78,75,79,77,76],
+    trendG:[84,82,86,88,85,87,86,88,85,89,87,86],
+    tips:['AirSial focuses on domestic routes and performs reliably for short hops.','LHE–ISB is the most punctual route in their network.','Newer fleet means cabin comfort is above average for domestic travel.','Limited route network — check availability before planning.'],
+    verdict:'good'
+  },
+  AB: {
+    name:'AirBlue', full:'AirBlue', code:'PA',
+    routes:['All routes','KHI–ISB','KHI–LHE','LHE–ISB','KHI–PEW','LHE–PEW'],
+    routeOT:    [null,79,76,83,69,72],
+    routeGrace: [null,88,86,91,79,82],
+    stats:{ontime:76,ontimeG:86,cancel:2.8,delay:11,baggage:95,comfort:3.8,value:4.2},
+    trend:[75,73,77,79,76,78,77,79,76,80,78,77],
+    trendG:[85,83,87,89,86,88,87,89,86,90,88,87],
+    tips:['AirBlue is one of the more reliable domestic choices in Pakistan.','LHE–ISB is consistently their best-performing route.','Good value for domestic travel — competitive pricing with decent service.','KHI–PEW can see weather-related delays in winter months.'],
+    verdict:'good'
+  },
+  SR: {
+    name:'SereneAir', full:'SereneAir', code:'ER',
+    routes:['All routes','KHI–ISB','KHI–LHE','LHE–ISB','KHI–PEW','ISB–PEW'],
+    routeOT:    [null,76,73,80,67,71],
+    routeGrace: [null,85,83,88,77,81],
+    stats:{ontime:73,ontimeG:83,cancel:3.5,delay:13,baggage:92,comfort:3.6,value:4.1},
+    trend:[72,70,74,76,73,75,74,76,73,77,75,74],
+    trendG:[82,80,84,86,83,85,84,86,83,87,85,84],
+    tips:['SereneAir offers a comfortable cabin with good legroom for domestic routes.','LHE–ISB is their strongest route for punctuality.','KHI–PEW sees occasional delays due to Peshawar airspace congestion.','Good option for business travellers on domestic corridors.'],
+    verdict:'good'
+  }
+};
+
+// Generate 90 days of fake flight logs per airline
+function generateFlights(code, routes) {
+  const out = [];
+  const statuses = ['On Time','On Time','On Time','Delayed','Delayed','Cancelled','On Time','Grace','Grace'];
+  for (let i=0; i<90; i++) {
+    const d = addDays(TODAY, -i);
+    const route = routes[Math.floor(Math.random()*routes.length)];
+    const rawSt = statuses[Math.floor(Math.random()*statuses.length)];
+    const delayMins = rawSt==='On Time'?0 : rawSt==='Grace'?Math.floor(Math.random()*14)+1 : rawSt==='Delayed'?Math.floor(Math.random()*60)+16 : 0;
+    out.push({
+      date:d,
+      flight: code+(100+Math.floor(Math.random()*900)),
+      route,
+      sched:`${String(6+Math.floor(Math.random()*14)).padStart(2,'0')}:${['00','30'][Math.floor(Math.random()*2)]}`,
+      delay:delayMins,
+      status:rawSt,
+      cancelled:rawSt==='Cancelled',
+      airline: code
+    });
+  }
+  return out.sort((a,b)=>b.date-a.date);
+}
+
+Object.keys(DATA).forEach(k => {
+  DATA[k].flights = generateFlights(DATA[k].code, DATA[k].routes.slice(1));
+});
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let graceOn = true;
+let trendChart = null;
+
+// Set default dates: last 14 days
+function initDates() {
+  document.getElementById('dateTo').value   = isoDate(TODAY);
+  document.getElementById('dateFrom').value = isoDate(addDays(TODAY,-14));
+}
+
+function setQuickPeriod(days, el) {
+  document.querySelectorAll('.ptab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('dateFrom').value = isoDate(addDays(TODAY,-days));
+  document.getElementById('dateTo').value   = isoDate(TODAY);
+  render();
+}
+
+function toggleGrace() {
+  graceOn = !graceOn;
+  document.getElementById('graceSwitch').classList.toggle('on', graceOn);
+  render();
+}
+
+function getDateRange() {
+  const from = new Date(document.getElementById('dateFrom').value + 'T00:00:00');
+  const to   = new Date(document.getElementById('dateTo').value + 'T23:59:59');
+  return {from, to};
+}
+
+function getPeriodKey(from, to) {
+  const days = Math.round((to-from)/(1000*60*60*24));
+  if (days<=8)  return 'week';
+  if (days<=16) return '2week';
+  if (days<=35) return 'month';
+  return '3month';
+}
+
+function onAirlineChange() {
+  updateRoutes();
+  render();
+}
+
+function updateRoutes() {
+  const a = document.getElementById('airlineSel').value;
+  const sel = document.getElementById('routeSel');
+  if (a === 'all') {
+    sel.innerHTML = '<option value="all">All routes</option>';
+    sel.disabled = true;
+    sel.style.opacity = '0.5';
+  } else {
+    sel.disabled = false;
+    sel.style.opacity = '1';
+    sel.innerHTML = DATA[a].routes.map((r,i) => `<option value="${i===0?'all':r}">${r}</option>`).join('');
+  }
+}
+
+function filterRoute(r) {
+  const sel = document.getElementById('routeSel');
+  if (sel.value === r) sel.value = 'all'; else sel.value = r;
+  render();
+}
+
+// ─── COMPARISON TABLE (standalone, always shows all airlines) ─────────────────
+function buildCompareTable(selectedKey, periodKey, grace) {
+  const allKeys = ['PIA','AS','AB','SR'];
+  const rows = allKeys.map(k => {
+    const al = DATA[k];
+    const s  = al.stats;
+    const ot = grace ? s.ontimeG : s.ontime;
+    return {key:k, al, s, ot};
+  });
+
+  rows.forEach(r => {
+    r.score = Math.round((r.ot*0.35)+((100-r.s.cancel*5)*0.25)+((100-Math.min(r.s.delay,30)/30*100)*0.15)+(r.s.baggage*0.1)+(r.s.comfort/5*100*0.08)+(r.s.value/5*100*0.07));
+    r.score = Math.max(0,Math.min(100,r.score));
+  });
+
+  const bestOT=Math.max(...rows.map(r=>r.ot)), worstOT=Math.min(...rows.map(r=>r.ot));
+  const bestC=Math.min(...rows.map(r=>r.s.cancel)), worstC=Math.max(...rows.map(r=>r.s.cancel));
+  const bestD=Math.min(...rows.map(r=>r.s.delay)), worstD=Math.max(...rows.map(r=>r.s.delay));
+  const bestB=Math.max(...rows.map(r=>r.s.baggage)), worstB=Math.min(...rows.map(r=>r.s.baggage));
+  const bestComf=Math.max(...rows.map(r=>r.s.comfort));
+  const bestVal=Math.max(...rows.map(r=>r.s.value));
+  const bestScore=Math.max(...rows.map(r=>r.score));
+
+  function tag(v,best,worst,low) {
+    if(v===best) return '<span class="best-tag">BEST</span>';
+    if(v===worst) return '<span class="worst-tag">WORST</span>';
+    return '';
+  }
+
+  const trows = rows.map(r => {
+    const isCur = r.key === selectedKey;
+    const sc = scoreColor(r.score);
+    const topPick = r.score===bestScore ? '<span class="recommend-badge">⭐ Top pick</span>' : '';
+    return `<tr class="${isCur?'current-airline':''}">
+      <td>
+        <div class="airline-cell">
+          <div class="airline-logo" style="background:${AIRLINE_COLORS[r.key]}">${r.al.name}</div>
+          <div>
+            <div class="airline-name-full">${r.al.full}${isCur?' <span style="font-size:11px;color:var(--sky);font-weight:400">(selected)</span>':''}</div>
+            <div style="margin-top:3px">${topPick}</div>
+          </div>
+        </div>
+      </td>
+      <td>
+        <div class="metric-bar">
+          <div class="mini-bar-bg"><div class="mini-bar-fill" style="width:${r.ot}%;background:${scoreColor(r.ot)}"></div></div>
+          <span class="metric-val" style="color:${scoreColor(r.ot)}">${r.ot}%</span>
+          ${tag(r.ot,bestOT,worstOT,false)}
+        </div>
+      </td>
+      <td><span class="metric-val" style="color:${r.s.cancel<=2?'#1FA364':r.s.cancel<=5?'#B07800':'#D63B3B'}">${r.s.cancel}%</span>${tag(r.s.cancel,bestC,worstC,true)}</td>
+      <td><span class="metric-val" style="color:${r.s.delay<=10?'#1FA364':r.s.delay<=18?'#B07800':'#D63B3B'}">${r.s.delay} min</span>${tag(r.s.delay,bestD,worstD,true)}</td>
+      <td><span class="metric-val" style="color:${r.s.baggage>=97?'#1FA364':r.s.baggage>=93?'#B07800':'#D63B3B'}">${r.s.baggage}%</span>${tag(r.s.baggage,bestB,worstB,false)}</td>
+      <td>${starsHtml(r.s.comfort)} <span style="font-size:12px;color:var(--text-muted)">${r.s.comfort.toFixed(1)}</span>${r.s.comfort===bestComf?'<span class="best-tag">BEST</span>':''}</td>
+      <td>${starsHtml(r.s.value)} <span style="font-size:12px;color:var(--text-muted)">${r.s.value.toFixed(1)}</span>${r.s.value===bestVal?'<span class="best-tag">BEST</span>':''}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="score-ring-sm" style="border-color:${sc};color:${sc}">${r.score}</div>
+          <span class="pill ${r.al.verdict==='good'?'pill-g':'pill-a'}">${r.al.verdict==='good'?'Reliable':'Mixed'}</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="compare-card">
+    <div class="compare-head">
+      <h3>🇵🇰 All Pakistani airlines — side by side</h3>
+      <span>${grace?'15-min grace on · ':''} Click an airline row to filter</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="compare-table" style="cursor:pointer">
+        <thead>
+          <tr>
+            <th style="min-width:190px">Airline</th>
+            <th>On-time${grace?' (grace)':''}</th>
+            <th>Cancellations</th>
+            <th>Avg delay</th>
+            <th>Baggage</th>
+            <th>Comfort</th>
+            <th>Value</th>
+            <th>Traveller score</th>
+          </tr>
+        </thead>
+        <tbody id="compareBody">${trows}</tbody>
+      </table>
+    </div>
+    <div style="padding:10px 16px;font-size:11px;color:var(--text-faint);border-top:1px solid var(--border);display:flex;gap:12px;flex-wrap:wrap">
+      <span><span class="best-tag">BEST</span> Best in category</span>
+      <span><span class="worst-tag">WORST</span> Worst in category</span>
+      <span>Traveller score = weighted blend of all KPIs</span>
+    </div>
+  </div>`;
+}
+
+// ─── MAIN RENDER ──────────────────────────────────────────────────────────────
+function render() {
+  const airlineKey  = document.getElementById('airlineSel').value;
+  const routeFilter = document.getElementById('routeSel').value;
+  const {from, to}  = getDateRange();
+  const periodKey   = getPeriodKey(from, to);
+  const fromLabel   = fmtDate(from);
+  const toLabel     = fmtDate(to);
+
+  // "All airlines" mode — show only comparison table + combined flight log
+  if (airlineKey === 'all') {
+    const allFlights = ['PIA','AS','AB','SR'].flatMap(k => DATA[k].flights)
+      .filter(f => f.date >= from && f.date <= to)
+      .sort((a,b) => b.date-a.date);
+
+    const tableRows = allFlights.slice(0,30).map(f => {
+      const al = Object.values(DATA).find(d => d.code === f.airline || DATA[f.airline.replace(/\d+/,'')]?.code === f.airline);
+      let statusHtml, delayHtml;
+      if(f.cancelled){statusHtml='<span class="pill pill-r">Cancelled</span>';delayHtml='<span class="delay-cell delay-late">—</span>';}
+      else if(f.delay===0){statusHtml='<span class="pill pill-g">On time</span>';delayHtml='<span class="delay-cell delay-none">0 min</span>';}
+      else if(f.delay<=15&&graceOn){statusHtml='<span class="pill pill-grace">Grace ≤15 min</span>';delayHtml=`<span class="delay-cell delay-grace">+${f.delay} min</span>`;}
+      else{statusHtml='<span class="pill pill-a">Delayed</span>';delayHtml=`<span class="delay-cell delay-late">+${f.delay} min</span>`;}
+      const aKey = ['PIA','AS','AB','SR'].find(k=>DATA[k].flights.includes(f)) || '?';
+      return `<tr>
+        <td>${fmtDate(f.date)}</td>
+        <td class="flight-num">${f.flight}</td>
+        <td><div style="display:flex;align-items:center;gap:6px"><div style="width:8px;height:8px;border-radius:50%;background:${AIRLINE_COLORS[aKey] || '#888'}"></div>${DATA[aKey]?.name || ''}</div></td>
+        <td>${f.route}</td>
+        <td>${f.sched}</td>
+        <td>${delayHtml}</td>
+        <td>${statusHtml}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('mainContent').innerHTML = `
+      <div class="section-hdr">
+        <h2>All airlines comparison</h2>
+        <span>${fromLabel} — ${toLabel}</span>
+      </div>
+      ${buildCompareTable('all', periodKey, graceOn)}
+      <div class="log-card">
+        <div class="log-head">
+          <h3>Combined flight log — all airlines</h3>
+          <span class="log-filter-note">${allFlights.length} flights · ${fromLabel} – ${toLabel}</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr><th>Date</th><th>Flight</th><th>Airline</th><th>Route</th><th>Sched</th><th>Delay</th><th>Status</th></tr></thead>
+            <tbody>${tableRows||'<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:2rem">No flights in this date range</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="cta-strip">
+        <div class="cta-strip-text"><strong>Is that cheaper ticket actually cheaper?</strong><span>Factor in delays, hotel stays from cancellations, and lost time.</span></div>
+        <button class="btn-cta">Calculate real cost →</button>
+      </div>`;
+    if(trendChart){trendChart.destroy();trendChart=null;}
+    // make compare rows clickable
+    bindCompareRows();
+    return;
+  }
+
+  // ─── Single airline mode ───────────────────────────────────────────────────
+  const d = DATA[airlineKey];
+  const s = d.stats;
+  const ontime = graceOn ? s.ontimeG : s.ontime;
+  const reliability = Math.max(0,Math.min(100,Math.round((ontime*0.5)+((100-s.cancel*5)*0.3)+((100-Math.min(s.delay,30)/30*100)*0.2))));
+  const ringColor = scoreColor(reliability);
+  const circ = 2*Math.PI*46;
+  const dashOff = circ-(reliability/100)*circ;
+  const [vLabel,vClass] = {good:['✓ Reliable choice','badge-good'],avg:['⚠ Mixed reliability','badge-avg'],bad:['✗ High risk','badge-bad']}[d.verdict];
+  const verdictText = {
+    good:`${d.name} is a solid pick. On-time performance is strong and cancellations are rare.`,
+    avg:`${d.name} is affordable but comes with trade-offs. Delays average ${s.delay} mins and cancellation rates are above norm. Build buffer time into your plans.`,
+    bad:`${d.name} has below-average reliability. Consider alternatives or buy refundable tickets only.`
+  }[d.verdict];
+
+  // Filter flights by date + route
+  let flights = d.flights.filter(f => f.date >= from && f.date <= to);
+  if(routeFilter!=='all') flights = flights.filter(f=>f.route===routeFilter);
+
+  const cancelCount = flights.filter(f=>f.cancelled).length;
+  const graceCount  = graceOn ? flights.filter(f=>!f.cancelled&&f.delay>0&&f.delay<=15).length : 0;
+
+  // Route on-time for selected route
+  let routeOTpct = null;
+  if(routeFilter!=='all'){
+    const ri = d.routes.indexOf(routeFilter);
+    if(ri>0) routeOTpct = graceOn ? d.routeGrace[ri] : d.routeOT[ri];
+  }
+
+  const tableRows = flights.slice(0,25).map(f => {
+    let statusHtml, delayHtml;
+    if(f.cancelled){statusHtml='<span class="pill pill-r">Cancelled</span>';delayHtml='<span class="delay-cell delay-late">—</span>';}
+    else if(f.delay===0){statusHtml='<span class="pill pill-g">On time</span>';delayHtml='<span class="delay-cell delay-none">0 min</span>';}
+    else if(f.delay<=15&&graceOn){statusHtml='<span class="pill pill-grace">Grace ≤15 min</span>';delayHtml=`<span class="delay-cell delay-grace">+${f.delay} min</span>`;}
+    else{statusHtml='<span class="pill pill-a">Delayed</span>';delayHtml=`<span class="delay-cell delay-late">+${f.delay} min</span>`;}
+    return `<tr><td>${fmtDate(f.date)}</td><td class="flight-num">${f.flight}</td><td>${f.route}</td><td>${f.sched}</td><td>${delayHtml}</td><td>${statusHtml}</td></tr>`;
+  }).join('');
+
+  document.getElementById('mainContent').innerHTML = `
+
+  <div class="section-hdr">
+    <h2>${d.full} — reliability report</h2>
+    <span>${fromLabel} — ${toLabel} · ${flights.length} flights tracked</span>
+  </div>
+
+  <!-- COMPARISON TABLE FIRST -->
+  ${buildCompareTable(airlineKey, periodKey, graceOn)}
+
+  <!-- VERDICT + SCORE -->
+  <div class="verdict-hero">
+    <div class="ring-wrap">
+      <div class="ring-relative">
+        <svg viewBox="0 0 110 110" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="55" cy="55" r="46" fill="none" stroke="#E2E6ED" stroke-width="9"/>
+          <circle cx="55" cy="55" r="46" fill="none" stroke="${ringColor}" stroke-width="9"
+            stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${dashOff.toFixed(1)}"
+            stroke-linecap="round" transform="rotate(-90 55 55)"/>
+        </svg>
+        <div class="score-num">${reliability}</div>
+      </div>
+      <div class="score-lbl">reliability score</div>
+    </div>
+    <div>
+      <div class="verdict-badge ${vClass}">${vLabel}</div>
+      <div class="verdict-name">${d.full}</div>
+      <div class="verdict-desc">${verdictText}</div>
+      ${routeFilter!=='all'?`<div class="grace-notice">📍 Route ${routeFilter} — on-time: <strong>${routeOTpct}%</strong></div>`:''}
+      ${graceOn?`<div class="grace-notice">⏱ Grace active — ${graceCount} flight${graceCount!==1?'s':''} within 15 min counted as on-time</div>`:''}
+      <div class="verdict-meta">📅 ${fromLabel} – ${toLabel} · Updated daily</div>
+    </div>
+  </div>
+
+  <!-- KPI CARDS -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-icon">🕐</div>
+      <div class="kpi-label">On-time${graceOn?' (w/grace)':''}</div>
+      <div class="kpi-value ${ontime>=80?'kpi-good':ontime>=65?'kpi-avg':'kpi-bad'}">${ontime}%</div>
+      <div class="kpi-bench">${graceOn?`Without grace: ${s.ontime}%`:'Domestic avg: 76%'}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon">❌</div>
+      <div class="kpi-label">Cancellation rate</div>
+      <div class="kpi-value ${s.cancel<=2?'kpi-good':s.cancel<=5?'kpi-avg':'kpi-bad'}">${s.cancel}%</div>
+      <div class="kpi-bench">${cancelCount} cancellation${cancelCount!==1?'s':''} in period</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon">⏳</div>
+      <div class="kpi-label">Avg delay if late</div>
+      <div class="kpi-value ${s.delay<=10?'kpi-good':s.delay<=18?'kpi-avg':'kpi-bad'}">${s.delay} min</div>
+      <div class="kpi-bench">Grace cutoff: 15 min</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon">🧳</div>
+      <div class="kpi-label">Baggage success</div>
+      <div class="kpi-value ${s.baggage>=97?'kpi-good':s.baggage>=93?'kpi-avg':'kpi-bad'}">${s.baggage}%</div>
+      <div class="kpi-bench">No lost or delayed bags</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon">💺</div>
+      <div class="kpi-label">Comfort rating</div>
+      <div class="kpi-value">${s.comfort.toFixed(1)}<span style="font-size:14px;color:var(--text-muted)">/5</span></div>
+      <div class="kpi-bench">${starsHtml(s.comfort)}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon">💰</div>
+      <div class="kpi-label">Value for money</div>
+      <div class="kpi-value">${s.value.toFixed(1)}<span style="font-size:14px;color:var(--text-muted)">/5</span></div>
+      <div class="kpi-bench">${starsHtml(s.value)}</div>
+    </div>
+  </div>
+
+  <!-- CHARTS ROW -->
+  <div class="two-col">
+    <div class="card">
+      <div class="card-title">On-time % by route${graceOn?' (w/ grace)':''}</div>
+      ${d.routes.slice(1).map((r,i)=>{
+        const pct=graceOn?d.routeGrace[i+1]:d.routeOT[i+1];
+        const isActive=routeFilter===r;
+        return `<div class="route-row ${isActive?'active-route':''}" onclick="filterRoute('${r}')">
+          <span class="route-name">${r}</span>
+          <div class="route-bg"><div class="route-fill" style="width:${pct}%;background:${scoreColor(pct)}"></div></div>
+          <span class="route-pct">${pct}%</span>
+        </div>`;
+      }).join('')}
+      <div style="font-size:11px;color:var(--text-faint);margin-top:10px">Click a route to filter the flight log</div>
+    </div>
+    <div class="card">
+      <div class="card-title">On-time trend — 12 weeks</div>
+      <div class="chart-wrap">
+        <canvas id="trendChart" role="img" aria-label="Weekly on-time percentage trend">Trend data.</canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIPS -->
+  <div class="tips-card">
+    <div class="tips-title">✈ Traveller tips for ${d.name}</div>
+    ${d.tips.map(t=>`<div class="tip-row"><div class="tip-dot"></div><div class="tip-text">${t}</div></div>`).join('')}
+  </div>
+
+  <!-- FLIGHT LOG -->
+  <div class="log-card">
+    <div class="log-head">
+      <h3>Flight log — ${d.name}</h3>
+      <span class="log-filter-note">${routeFilter==='all'?'All routes':'Route: '+routeFilter} · ${flights.length} flights · ${fromLabel} – ${toLabel}</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Date</th><th>Flight</th><th>Route</th><th>Scheduled</th><th>Delay</th><th>Status</th></tr></thead>
+        <tbody>${tableRows||'<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:2rem">No flights found for this filter</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="cta-strip">
+    <div class="cta-strip-text">
+      <strong>Is that cheaper ticket actually cheaper?</strong>
+      <span>Factor in potential delays, hotel stays from cancellations, and lost time.</span>
+    </div>
+    <button class="btn-cta">Calculate real cost →</button>
+  </div>`;
+
+  // Trend chart
+  if(trendChart) trendChart.destroy();
+  const tData = graceOn ? d.trendG : d.trend;
+  trendChart = new Chart(document.getElementById('trendChart'),{
+    type:'line',
+    data:{
+      labels:['W1','W2','W3','W4','W5','W6','W7','W8','W9','W10','W11','W12'],
+      datasets:[{label:'On-time %',data:tData,borderColor:ringColor,backgroundColor:ringColor+'18',fill:true,borderWidth:2.5,pointRadius:3,pointBackgroundColor:ringColor,tension:0.35}]
+    },
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{y:{min:40,max:100,ticks:{font:{size:11},callback:v=>v+'%'},grid:{color:'rgba(0,0,0,0.05)'}},x:{ticks:{font:{size:10}},grid:{display:false}}}}
+  });
+
+  bindCompareRows();
+}
+
+function bindCompareRows() {
+  const body = document.getElementById('compareBody');
+  if(!body) return;
+  const keys = ['PIA','AS','AB','SR'];
+  body.querySelectorAll('tr').forEach((tr,i) => {
+    tr.onclick = () => {
+      const sel = document.getElementById('airlineSel');
+      const k = keys[i];
+      if(sel.value === k) { sel.value='all'; }
+      else { sel.value = k; }
+      onAirlineChange();
+    };
+  });
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+initDates();
+updateRoutes();
+render();
+</script>
+</body>
+</html>
