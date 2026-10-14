@@ -1,0 +1,43 @@
+name: Update flight data
+
+on:
+  schedule:
+    # Every 2nd day at 23:22 Pakistan time (18:22 UTC) ≈ 16 runs × 4 calls = ~64 calls/month
+    - cron: '22 18 */2 * *'
+  workflow_dispatch: # lets you run it manually from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: flight-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Fetch flights from Aviationstack
+        run: node scripts/fetch-flights.mjs
+        env:
+          AVIATIONSTACK_KEY: ${{ secrets.AVIATIONSTACK_KEY }}
+          MAX_CALLS_PER_MONTH: '92'
+
+      - name: Commit updated data
+        if: always()
+        run: |
+          git config user.name "flighttrust-bot"
+          git config user.email "flighttrust-bot@users.noreply.github.com"
+          git add data/flights.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update flight data"
+            git push
+          fi

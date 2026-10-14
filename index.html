@@ -189,7 +189,22 @@
     .btn-check { grid-column:span 2; justify-content:center; }
     .two-col { grid-template-columns:1fr; }
     .verdict-hero { grid-template-columns:1fr; text-align:center; }
+    nav { padding:0 1rem; }
+    .nav-links { display:none; }
   }
+
+  /* LOADING + DATA SOURCE (API version) */
+  .loading-wrap { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4rem 1rem; gap:14px; color:var(--text-muted); font-size:14px; }
+  .spinner { width:42px; height:42px; border:4px solid var(--border); border-top-color:var(--sky); border-radius:50%; animation:ft-spin .8s linear infinite; }
+  @keyframes ft-spin { to { transform:rotate(360deg); } }
+  .data-banner { display:flex; align-items:center; gap:8px; flex-wrap:wrap; border-radius:var(--radius-sm); padding:9px 14px; font-size:12.5px; margin-bottom:1rem; border:1px solid; line-height:1.5; }
+  .data-live   { background:var(--green-light); border-color:#1FA36433; color:#136840; }
+  .data-mixed  { background:var(--amber-light); border-color:#F4A82740; color:#7A5200; }
+  .data-sample { background:#EDF4FF; border-color:#1558A833; color:#1558A8; }
+  .live-dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 0 3px rgba(31,163,100,.2); flex-shrink:0; }
+  .src-tag { display:inline-block; font-size:10px; font-weight:700; padding:1px 6px; border-radius:99px; margin-left:4px; vertical-align:middle; background:#EDF4FF; color:#1558A8; }
+  .src-tag.live { background:var(--green-light); color:#136840; }
+  .pill-pending { background:var(--sand); color:var(--text-muted); }
 </style>
 </head>
 <body>
@@ -259,23 +274,54 @@
   </div>
 </section>
 
-<main class="main" id="mainContent"></main>
+<main class="main" id="mainContent">
+  <div class="loading-wrap"><div class="spinner"></div>Loading latest flight data…</div>
+</main>
 
-<footer><strong>FlightTrust Pakistan</strong> — Data updated daily from flight tracking feeds. 15-min grace period follows PCAA standard. &copy; 2026</footer>
+<footer><strong>FlightTrust Pakistan</strong> — <span id="footerNote">Flight data refreshed every 2 days from live tracking feeds.</span> 15-min grace period follows PCAA standard. &copy; 2026</footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-const TODAY = new Date(2026, 6, 27);
+// ═════════════════════════════════════════════════════════════════════════════
+//  FlightTrust Pakistan — Aviationstack edition
+//  Live data is fetched by a GitHub Action (scripts/fetch-flights.mjs) and saved
+//  to data/flights.json. This page only READS that file — no API key in the
+//  browser, and every visitor shares the same cache (zero API calls per visit).
+//  Any airline without enough live flights falls back to sample data.
+// ═════════════════════════════════════════════════════════════════════════════
 
-function isoDate(d) {
-  return d.toISOString().split('T')[0];
-}
-function addDays(d, n) {
-  const r = new Date(d); r.setDate(r.getDate() + n); return r;
-}
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
+const CONFIG = {
+  DATA_URL: 'data/flights.json',
+  CACHE_KEY: 'flighttrust_data_v1',
+  CACHE_MINUTES: 30,        // browser keeps a copy for 30 min
+  FETCH_TIMEOUT_MS: 8000,
+  MIN_LIVE_FLIGHTS: 10,     // below this, an airline uses sample data
+  GRACE_MIN: 15,            // the 15-minute grace period
+};
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+const TODAY = new Date();
+function pad(n) { return String(n).padStart(2, '0'); }
+// Local-time ISO date (avoids UTC off-by-one after midnight in Pakistan)
+function isoDate(d) { return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function parseISO(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
 function fmtDate(d) {
+  if (typeof d === 'string') d = parseISO(d);
   return d.toLocaleDateString('en-PK', {day:'2-digit', month:'short', year:'numeric'});
+}
+function fmtShort(s) { return parseISO(s).toLocaleDateString('en-PK', {day:'2-digit', month:'short'}); }
+function timeAgo(iso) {
+  if (!iso) return 'unknown';
+  const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if (mins < 60) return `${Math.max(1, mins)} min ago`;
+  const h = Math.round(mins / 60);
+  if (h < 48) return `${h} hour${h !== 1 ? 's' : ''} ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function scoreColor(s) { return s>=80?'#1FA364':s>=65?'#F4A827':'#D63B3B'; }
 function starsHtml(r) {
@@ -283,205 +329,377 @@ function starsHtml(r) {
   return '<span class="stars">'+'★'.repeat(f)+(h?'☆':'')+'☆'.repeat(e)+'</span>';
 }
 
-// ─── DATA ─────────────────────────────────────────────────────────────────────
+// ─── AIRLINES ────────────────────────────────────────────────────────────────
+// baggage / comfort / value are editorial ratings (not available from any flight feed).
+// profile + sampleRoutes are only used for the sample-data fallback.
+const KEYS = ['PIA','AS','AB','SR'];
+const CODE_TO_KEY = {PK:'PIA', PF:'AS', PA:'AB', ER:'SR'};
 const AIRLINE_COLORS = {PIA:'#166AB0', AS:'#1FA364', AB:'#D63B3B', SR:'#8B5CF6'};
 
-const DATA = {
+const AIRLINES = {
   PIA: {
     name:'PIA', full:'Pakistan International Airlines', code:'PK',
-    routes:['All routes','KHI–LHE','KHI–DXB','ISB–LHR','LHE–DXB','KHI–MAN','ISB–DXB','LHE–ISB'],
-    routeOT:    [null,72,58,54,61,49,63,80],
-    routeGrace: [null,81,70,65,73,62,75,88],
-    stats:{ontime:63,ontimeG:74,cancel:7.6,delay:21,baggage:90,comfort:2.9,value:3.2},
-    trend:[61,58,64,66,63,67,65,62,64,68,65,63],
-    trendG:[72,69,75,77,74,78,76,73,75,79,76,74],
-    tips:['PIA domestic routes (KHI–LHE, ISB–LHE) perform significantly better than long-haul.','Early morning departures have the strongest on-time performance.','KHI–LHR has the highest cancellation rate — always build buffer time.','Avoid Friday evenings on PIA — historically the worst delay window.'],
-    verdict:'avg'
+    ratings:{baggage:90, comfort:2.9, value:3.2},
+    profile:{cancel:.076, grace:.11, late:.184, lateMax:45, perDay:6},
+    sampleRoutes:['KHI–LHE','KHI–DXB','ISB–LHR','LHE–DXB','KHI–MAN','ISB–DXB','LHE–ISB'],
+    sampleTips:['PIA domestic routes (KHI–LHE, ISB–LHE) perform significantly better than long-haul.','Early morning departures have the strongest on-time performance.','KHI–LHR has the highest cancellation rate — always build buffer time.','Avoid Friday evenings on PIA — historically the worst delay window.'],
+    evergreen:['On international connections, leave a generous layover — missed connections are costly to rebook.']
   },
   AS: {
     name:'AirSial', full:'AirSial', code:'PF',
-    routes:['All routes','KHI–LHE','LHE–ISB','KHI–ISB','FSD–KHI','MUX–LHE'],
-    routeOT:    [null,78,82,75,70,73],
-    routeGrace: [null,87,90,84,80,82],
-    stats:{ontime:75,ontimeG:85,cancel:3.2,delay:12,baggage:93,comfort:3.5,value:4.3},
-    trend:[74,72,76,78,75,77,76,78,75,79,77,76],
-    trendG:[84,82,86,88,85,87,86,88,85,89,87,86],
-    tips:['AirSial focuses on domestic routes and performs reliably for short hops.','LHE–ISB is the most punctual route in their network.','Newer fleet means cabin comfort is above average for domestic travel.','Limited route network — check availability before planning.'],
-    verdict:'good'
+    ratings:{baggage:93, comfort:3.5, value:4.3},
+    profile:{cancel:.032, grace:.10, late:.118, lateMax:25, perDay:5},
+    sampleRoutes:['KHI–LHE','LHE–ISB','KHI–ISB','LYP–KHI','MUX–LHE'],
+    sampleTips:['AirSial focuses on domestic routes and performs reliably for short hops.','LHE–ISB is the most punctual route in their network.','Newer fleet means cabin comfort is above average for domestic travel.','Limited route network — check availability before planning.'],
+    evergreen:['Limited route network — check availability before planning.']
   },
   AB: {
     name:'AirBlue', full:'AirBlue', code:'PA',
-    routes:['All routes','KHI–ISB','KHI–LHE','LHE–ISB','KHI–PEW','LHE–PEW'],
-    routeOT:    [null,79,76,83,69,72],
-    routeGrace: [null,88,86,91,79,82],
-    stats:{ontime:76,ontimeG:86,cancel:2.8,delay:11,baggage:95,comfort:3.8,value:4.2},
-    trend:[75,73,77,79,76,78,77,79,76,80,78,77],
-    trendG:[85,83,87,89,86,88,87,89,86,90,88,87],
-    tips:['AirBlue is one of the more reliable domestic choices in Pakistan.','LHE–ISB is consistently their best-performing route.','Good value for domestic travel — competitive pricing with decent service.','KHI–PEW can see weather-related delays in winter months.'],
-    verdict:'good'
+    ratings:{baggage:95, comfort:3.8, value:4.2},
+    profile:{cancel:.028, grace:.10, late:.112, lateMax:25, perDay:5},
+    sampleRoutes:['KHI–ISB','KHI–LHE','LHE–ISB','KHI–PEW','LHE–PEW'],
+    sampleTips:['AirBlue is one of the more reliable domestic choices in Pakistan.','LHE–ISB is consistently their best-performing route.','Good value for domestic travel — competitive pricing with decent service.','KHI–PEW can see weather-related delays in winter months.'],
+    evergreen:['Northern routes can see weather-related delays in winter months.']
   },
   SR: {
     name:'SereneAir', full:'SereneAir', code:'ER',
-    routes:['All routes','KHI–ISB','KHI–LHE','LHE–ISB','KHI–PEW','ISB–PEW'],
-    routeOT:    [null,76,73,80,67,71],
-    routeGrace: [null,85,83,88,77,81],
-    stats:{ontime:73,ontimeG:83,cancel:3.5,delay:13,baggage:92,comfort:3.6,value:4.1},
-    trend:[72,70,74,76,73,75,74,76,73,77,75,74],
-    trendG:[82,80,84,86,83,85,84,86,83,87,85,84],
-    tips:['SereneAir offers a comfortable cabin with good legroom for domestic routes.','LHE–ISB is their strongest route for punctuality.','KHI–PEW sees occasional delays due to Peshawar airspace congestion.','Good option for business travellers on domestic corridors.'],
-    verdict:'good'
+    ratings:{baggage:92, comfort:3.6, value:4.1},
+    profile:{cancel:.035, grace:.10, late:.135, lateMax:28, perDay:4},
+    sampleRoutes:['KHI–ISB','KHI–LHE','LHE–ISB','KHI–PEW','ISB–PEW'],
+    sampleTips:['SereneAir offers a comfortable cabin with good legroom for domestic routes.','LHE–ISB is their strongest route for punctuality.','KHI–PEW sees occasional delays due to Peshawar airspace congestion.','Good option for business travellers on domestic corridors.'],
+    evergreen:['Good option for business travellers on domestic corridors.']
   }
 };
 
-// Generate 90 days of fake flight logs per airline
-function generateFlights(code, routes) {
-  const out = [];
-  const statuses = ['On Time','On Time','On Time','Delayed','Delayed','Cancelled','On Time','Grace','Grace'];
-  for (let i=0; i<90; i++) {
-    const d = addDays(TODAY, -i);
-    const route = routes[Math.floor(Math.random()*routes.length)];
-    const rawSt = statuses[Math.floor(Math.random()*statuses.length)];
-    const delayMins = rawSt==='On Time'?0 : rawSt==='Grace'?Math.floor(Math.random()*14)+1 : rawSt==='Delayed'?Math.floor(Math.random()*60)+16 : 0;
-    out.push({
-      date:d,
-      flight: code+(100+Math.floor(Math.random()*900)),
-      route,
-      sched:`${String(6+Math.floor(Math.random()*14)).padStart(2,'0')}:${['00','30'][Math.floor(Math.random()*2)]}`,
-      delay:delayMins,
-      status:rawSt,
-      cancelled:rawSt==='Cancelled',
-      airline: code
-    });
-  }
-  return out.sort((a,b)=>b.date-a.date);
-}
-
-Object.keys(DATA).forEach(k => {
-  DATA[k].flights = generateFlights(DATA[k].code, DATA[k].routes.slice(1));
-});
-
-// ─── STATE ────────────────────────────────────────────────────────────────────
+// ─── STATE ───────────────────────────────────────────────────────────────────
+let FLIGHTS = [];           // normalised flights, all airlines
+let SOURCE = {};            // per airline: 'live' | 'sample'
+let META = null;            // meta block from data/flights.json
+let LOAD_ERROR = null;
 let graceOn = true;
 let trendChart = null;
 
-// Set default dates: last 14 days
-function initDates() {
-  document.getElementById('dateTo').value   = isoDate(TODAY);
-  document.getElementById('dateFrom').value = isoDate(addDays(TODAY,-14));
+// ─── SAMPLE DATA (fallback) ──────────────────────────────────────────────────
+// Seeded so the sample numbers don't jump around on every refresh.
+function mulberry32(a) {
+  return function() {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function generateSample(key) {
+  const al = AIRLINES[key], p = al.profile;
+  const rnd = mulberry32([...key].reduce((s,c) => s*31 + c.charCodeAt(0), 7));
+  const out = [];
+  for (let i = 1; i <= 90; i++) {
+    const date = isoDate(addDays(TODAY, -i));
+    for (let j = 0; j < p.perDay; j++) {
+      const route = al.sampleRoutes[Math.floor(rnd() * al.sampleRoutes.length)];
+      const r = rnd();
+      let status = 'ok', delay = 0;
+      if (r < p.cancel) { status = 'cancelled'; delay = null; }
+      else if (r < p.cancel + p.late) delay = 16 + Math.floor(rnd() * p.lateMax);
+      else if (r < p.cancel + p.late + p.grace) delay = 1 + Math.floor(rnd() * 15);
+      out.push({
+        date, airline:key, route, delay, status, live:false,
+        flight: al.code + (100 + Math.floor(rnd() * 900)),
+        sched: `${pad(5 + Math.floor(rnd() * 17))}:${['00','15','30','45'][Math.floor(rnd() * 4)]}`
+      });
+    }
+  }
+  return out;
 }
 
+// ─── LIVE DATA ───────────────────────────────────────────────────────────────
+function normalizeLive(r) {
+  const key = CODE_TO_KEY[r && r.a];
+  if (!key || !r.d || !r.f) return null;
+  let status;
+  if (r.s === 'cancelled') status = 'cancelled';
+  else if (r.s === 'diverted' || r.s === 'incident') status = 'diverted';
+  else if (r.x || r.s === 'landed') status = 'ok';
+  else status = 'pending'; // scheduled / not departed yet — shown in log, not in stats
+  return {
+    date: r.d, airline: key, flight: r.f,
+    route: r.dep && r.arr ? `${r.dep}–${r.arr}` : '—',
+    sched: r.st ? String(r.st).slice(11, 16) : '—',
+    delay: status === 'ok' ? (r.dl ?? 0) : null,
+    status, live: true
+  };
+}
+
+async function loadData() {
+  let json = null;
+  // 1) Browser cache (30 min)
+  try {
+    const c = JSON.parse(localStorage.getItem(CONFIG.CACHE_KEY) || 'null');
+    if (c && Date.now() - c.t < CONFIG.CACHE_MINUTES * 60000) json = c.d;
+  } catch (e) {}
+  // 2) Shared cache file (updated by GitHub Action)
+  if (!json) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), CONFIG.FETCH_TIMEOUT_MS);
+      const bust = Math.floor(Date.now() / (10 * 60000)); // new URL every 10 min
+      const res = await fetch(`${CONFIG.DATA_URL}?v=${bust}`, {signal: ctrl.signal, cache: 'no-cache'});
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      json = await res.json();
+      try { localStorage.setItem(CONFIG.CACHE_KEY, JSON.stringify({t: Date.now(), d: json})); } catch (e) {}
+    } catch (e) {
+      LOAD_ERROR = e.name === 'AbortError' ? 'timed out' : e.message;
+      console.warn('FlightTrust: live data unavailable, using sample data.', e);
+    }
+  }
+  buildDataset(json);
+}
+
+function buildDataset(json) {
+  META = json && json.meta ? json.meta : null;
+  const live = (json && Array.isArray(json.flights) ? json.flights : []).map(normalizeLive).filter(Boolean);
+  FLIGHTS = [];
+  KEYS.forEach(k => {
+    const mine = live.filter(f => f.airline === k);
+    const counted = mine.filter(f => f.status !== 'pending').length;
+    if (counted >= CONFIG.MIN_LIVE_FLIGHTS) { SOURCE[k] = 'live'; FLIGHTS.push(...mine); }
+    else { SOURCE[k] = 'sample'; FLIGHTS.push(...generateSample(k)); }
+  });
+  FLIGHTS.sort((a,b) => b.date.localeCompare(a.date) || b.sched.localeCompare(a.sched));
+}
+
+// ─── STATS ENGINE (grace period applied here) ────────────────────────────────
+// ontime   = departed with 0 delay
+// grace    = 1–15 min late (counted on-time only when grace toggle is on)
+// late     = beyond the threshold
+function classify(f, grace) {
+  if (f.status === 'cancelled') return 'cancelled';
+  if (f.status === 'diverted') return 'diverted';
+  if (f.status === 'pending') return 'pending';
+  if (!f.delay || f.delay <= 0) return 'ontime';
+  if (grace && f.delay <= CONFIG.GRACE_MIN) return 'grace';
+  return 'late';
+}
+
+function computeStats(flights, grace) {
+  const counted = flights.filter(f => f.status !== 'pending');
+  const total = counted.length;
+  const cancelled = counted.filter(f => f.status === 'cancelled').length;
+  const operated = total - cancelled;
+  let ontime = 0, ontimeRaw = 0, graceCount = 0, lateSum = 0, lateN = 0;
+  counted.forEach(f => {
+    const c = classify(f, grace);
+    if (c === 'ontime') { ontime++; ontimeRaw++; }
+    else if (c === 'grace') { ontime++; graceCount++; }
+    else if (c === 'late') { lateSum += f.delay; lateN++; }
+  });
+  if (!grace) graceCount = 0;
+  return {
+    total, cancelled, operated, graceCount,
+    ontimePct: operated ? Math.round(ontime / operated * 100) : null,
+    ontimeRawPct: operated ? Math.round(ontimeRaw / operated * 100) : null,
+    cancelPct: total ? Math.round(cancelled / total * 1000) / 10 : null,
+    avgDelay: lateN ? Math.round(lateSum / lateN) : 0
+  };
+}
+
+function reliabilityScore(st) {
+  if (!st.total || st.ontimePct == null) return null;
+  const v = (st.ontimePct*0.5) + ((100 - st.cancelPct*5)*0.3) + ((100 - Math.min(st.avgDelay,30)/30*100)*0.2);
+  return Math.max(0, Math.min(100, Math.round(v)));
+}
+function travellerScore(st, r) {
+  if (!st.total || st.ontimePct == null) return null;
+  const v = (st.ontimePct*0.35) + ((100 - st.cancelPct*5)*0.25) + ((100 - Math.min(st.avgDelay,30)/30*100)*0.15)
+          + (r.baggage*0.1) + (r.comfort/5*100*0.08) + (r.value/5*100*0.07);
+  return Math.max(0, Math.min(100, Math.round(v)));
+}
+function verdictFor(score) { return score == null ? 'none' : score >= 75 ? 'good' : score >= 60 ? 'avg' : 'bad'; }
+
+function flightsFor(key, from, to, route) {
+  return FLIGHTS.filter(f => f.airline === key && f.date >= from && f.date <= to && (route === 'all' || f.route === route));
+}
+function routesFor(key) {
+  const counts = {};
+  FLIGHTS.forEach(f => { if (f.airline === key && f.route !== '—') counts[f.route] = (counts[f.route] || 0) + 1; });
+  return Object.entries(counts).sort((a,b) => b[1] - a[1]).slice(0, 10).map(e => e[0]);
+}
+function routeBreakdown(flights, grace) {
+  const groups = {};
+  flights.forEach(f => { if (f.route !== '—') (groups[f.route] = groups[f.route] || []).push(f); });
+  return Object.entries(groups)
+    .map(([route, fl]) => { const st = computeStats(fl, grace); return {route, n: st.operated, pct: st.ontimePct}; })
+    .filter(r => r.pct != null)
+    .sort((a,b) => b.n - a.n).slice(0, 8);
+}
+function weeklyTrend(key, route, grace) {
+  const labels = [], data = [];
+  for (let w = 11; w >= 0; w--) {
+    const end = addDays(TODAY, -7*w), start = addDays(end, -6);
+    const s = isoDate(start), e = isoDate(end);
+    const st = computeStats(flightsFor(key, s, e, route), grace);
+    labels.push(fmtShort(s));
+    data.push(st.operated >= 3 ? st.ontimePct : null);
+  }
+  return {labels, data};
+}
+function buildTips(key, flights, grace) {
+  const al = AIRLINES[key];
+  if (SOURCE[key] !== 'live') return al.sampleTips;
+  const tips = [];
+  const routes = routeBreakdown(flights, grace).filter(r => r.n >= 3);
+  if (routes.length >= 2) {
+    const best = routes.reduce((a,b) => b.pct > a.pct ? b : a);
+    const worst = routes.reduce((a,b) => b.pct < a.pct ? b : a);
+    tips.push(`${best.route} has been ${al.name}'s most punctual route in this period — ${best.pct}% on time across ${best.n} flights.`);
+    if (worst.route !== best.route && worst.pct < best.pct)
+      tips.push(`${worst.route} is the weakest route right now at ${worst.pct}% on time — build in buffer time.`);
+  }
+  const am = computeStats(flights.filter(f => f.sched !== '—' && f.sched < '12:00'), grace);
+  const pm = computeStats(flights.filter(f => f.sched !== '—' && f.sched >= '12:00'), grace);
+  if (am.operated >= 5 && pm.operated >= 5 && Math.abs(am.ontimePct - pm.ontimePct) >= 5) {
+    tips.push(am.ontimePct > pm.ontimePct
+      ? `Morning departures (before noon) ran ${am.ontimePct}% on time vs ${pm.ontimePct}% later in the day — book early flights when you can.`
+      : `Afternoon/evening departures ran ${pm.ontimePct}% on time vs ${am.ontimePct}% for morning flights in this period.`);
+  }
+  const st = computeStats(flights, grace);
+  if (st.cancelled > 0) tips.push(`${st.cancelled} of ${st.total} tracked flights were cancelled in this period — consider a flexible or refundable fare.`);
+  else if (st.total >= 10) tips.push(`No cancellations recorded across ${st.total} tracked flights in this period.`);
+  tips.push(...al.evergreen);
+  return tips.slice(0, 5);
+}
+
+// ─── UI CONTROLS ─────────────────────────────────────────────────────────────
+function initDates() {
+  document.getElementById('dateTo').value   = isoDate(TODAY);
+  document.getElementById('dateFrom').value = isoDate(addDays(TODAY, -14));
+}
 function setQuickPeriod(days, el) {
-  document.querySelectorAll('.ptab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.ptab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  document.getElementById('dateFrom').value = isoDate(addDays(TODAY,-days));
+  document.getElementById('dateFrom').value = isoDate(addDays(TODAY, -days));
   document.getElementById('dateTo').value   = isoDate(TODAY);
   render();
 }
-
 function toggleGrace() {
   graceOn = !graceOn;
   document.getElementById('graceSwitch').classList.toggle('on', graceOn);
   render();
 }
-
 function getDateRange() {
-  const from = new Date(document.getElementById('dateFrom').value + 'T00:00:00');
-  const to   = new Date(document.getElementById('dateTo').value + 'T23:59:59');
+  let from = document.getElementById('dateFrom').value || isoDate(addDays(TODAY, -14));
+  let to   = document.getElementById('dateTo').value   || isoDate(TODAY);
+  if (from > to) [from, to] = [to, from];
   return {from, to};
 }
-
-function getPeriodKey(from, to) {
-  const days = Math.round((to-from)/(1000*60*60*24));
-  if (days<=8)  return 'week';
-  if (days<=16) return '2week';
-  if (days<=35) return 'month';
-  return '3month';
-}
-
-function onAirlineChange() {
-  updateRoutes();
-  render();
-}
-
+function onAirlineChange() { updateRoutes(); render(); }
 function updateRoutes() {
   const a = document.getElementById('airlineSel').value;
   const sel = document.getElementById('routeSel');
   if (a === 'all') {
     sel.innerHTML = '<option value="all">All routes</option>';
-    sel.disabled = true;
-    sel.style.opacity = '0.5';
+    sel.disabled = true; sel.style.opacity = '0.5';
   } else {
-    sel.disabled = false;
-    sel.style.opacity = '1';
-    sel.innerHTML = DATA[a].routes.map((r,i) => `<option value="${i===0?'all':r}">${r}</option>`).join('');
+    sel.disabled = false; sel.style.opacity = '1';
+    sel.innerHTML = '<option value="all">All routes</option>' +
+      routesFor(a).map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
   }
 }
-
 function filterRoute(r) {
   const sel = document.getElementById('routeSel');
-  if (sel.value === r) sel.value = 'all'; else sel.value = r;
+  sel.value = sel.value === r ? 'all' : r;
   render();
 }
 
-// ─── COMPARISON TABLE (standalone, always shows all airlines) ─────────────────
-function buildCompareTable(selectedKey, periodKey, grace) {
-  const allKeys = ['PIA','AS','AB','SR'];
-  const rows = allKeys.map(k => {
-    const al = DATA[k];
-    const s  = al.stats;
-    const ot = grace ? s.ontimeG : s.ontime;
-    return {key:k, al, s, ot};
+// ─── RENDER PIECES ───────────────────────────────────────────────────────────
+function dataBanner() {
+  const liveKeys = KEYS.filter(k => SOURCE[k] === 'live');
+  const sampleKeys = KEYS.filter(k => SOURCE[k] !== 'live');
+  const names = ks => ks.map(k => AIRLINES[k].name).join(', ');
+  const updated = META && META.updated_at ? `updated ${timeAgo(META.updated_at)}` : '';
+  if (liveKeys.length === KEYS.length) {
+    return `<div class="data-banner data-live"><span class="live-dot"></span><strong>Live data</strong> · Aviationstack flight feed · ${updated}</div>`;
+  }
+  if (liveKeys.length) {
+    return `<div class="data-banner data-mixed"><span class="live-dot"></span><strong>Live:</strong> ${names(liveKeys)} · ${updated} &nbsp;|&nbsp; <strong>Sample data:</strong> ${names(sampleKeys)} (not enough live flights collected yet)</div>`;
+  }
+  const why = LOAD_ERROR ? 'live feed unavailable right now' : 'live feed is still collecting flights';
+  return `<div class="data-banner data-sample">ℹ️ <strong>Showing sample data</strong> — ${why}. Real numbers will appear automatically.</div>`;
+}
+function srcTag(key) {
+  return SOURCE[key] === 'live' ? '<span class="src-tag live">LIVE</span>' : '<span class="src-tag">SAMPLE</span>';
+}
+function statusCells(f, grace) {
+  switch (classify(f, grace)) {
+    case 'cancelled': return ['<span class="pill pill-r">Cancelled</span>', '<span class="delay-cell delay-late">—</span>'];
+    case 'diverted':  return ['<span class="pill pill-r">Diverted</span>',  '<span class="delay-cell delay-late">—</span>'];
+    case 'pending':   return ['<span class="pill pill-pending">Scheduled</span>', '<span class="delay-cell" style="color:var(--text-faint)">—</span>'];
+    case 'ontime':    return ['<span class="pill pill-g">On time</span>', '<span class="delay-cell delay-none">0 min</span>'];
+    case 'grace':     return ['<span class="pill pill-grace">Grace ≤15 min</span>', `<span class="delay-cell delay-grace">+${f.delay} min</span>`];
+    default:          return ['<span class="pill pill-a">Delayed</span>', `<span class="delay-cell delay-late">+${f.delay} min</span>`];
+  }
+}
+
+// ─── COMPARISON TABLE (always shows all airlines) ────────────────────────────
+function buildCompareTable(selectedKey, from, to, grace) {
+  const rows = KEYS.map(k => {
+    const al = AIRLINES[k];
+    const st = computeStats(flightsFor(k, from, to, 'all'), grace);
+    const score = travellerScore(st, al.ratings);
+    return {key:k, al, st, r:al.ratings, score, has: score != null};
   });
+  const withData = rows.filter(r => r.has);
+  const ext = (fn, pick) => withData.length >= 2 ? pick(...withData.map(fn)) : null;
+  const bestOT = ext(r=>r.st.ontimePct, Math.max), worstOT = ext(r=>r.st.ontimePct, Math.min);
+  const bestC  = ext(r=>r.st.cancelPct, Math.min), worstC  = ext(r=>r.st.cancelPct, Math.max);
+  const bestD  = ext(r=>r.st.avgDelay, Math.min),  worstD  = ext(r=>r.st.avgDelay, Math.max);
+  const bestB = Math.max(...rows.map(r=>r.r.baggage)), worstB = Math.min(...rows.map(r=>r.r.baggage));
+  const bestComf = Math.max(...rows.map(r=>r.r.comfort));
+  const bestVal = Math.max(...rows.map(r=>r.r.value));
+  const bestScore = withData.length ? Math.max(...withData.map(r=>r.score)) : null;
 
-  rows.forEach(r => {
-    r.score = Math.round((r.ot*0.35)+((100-r.s.cancel*5)*0.25)+((100-Math.min(r.s.delay,30)/30*100)*0.15)+(r.s.baggage*0.1)+(r.s.comfort/5*100*0.08)+(r.s.value/5*100*0.07));
-    r.score = Math.max(0,Math.min(100,r.score));
-  });
-
-  const bestOT=Math.max(...rows.map(r=>r.ot)), worstOT=Math.min(...rows.map(r=>r.ot));
-  const bestC=Math.min(...rows.map(r=>r.s.cancel)), worstC=Math.max(...rows.map(r=>r.s.cancel));
-  const bestD=Math.min(...rows.map(r=>r.s.delay)), worstD=Math.max(...rows.map(r=>r.s.delay));
-  const bestB=Math.max(...rows.map(r=>r.s.baggage)), worstB=Math.min(...rows.map(r=>r.s.baggage));
-  const bestComf=Math.max(...rows.map(r=>r.s.comfort));
-  const bestVal=Math.max(...rows.map(r=>r.s.value));
-  const bestScore=Math.max(...rows.map(r=>r.score));
-
-  function tag(v,best,worst,low) {
-    if(v===best) return '<span class="best-tag">BEST</span>';
-    if(v===worst) return '<span class="worst-tag">WORST</span>';
+  function tag(v, best, worst) {
+    if (best == null || best === worst) return '';
+    if (v === best) return '<span class="best-tag">BEST</span>';
+    if (v === worst) return '<span class="worst-tag">WORST</span>';
     return '';
   }
+  const noData = '<span style="font-size:12px;color:var(--text-faint)">No flights</span>';
 
   const trows = rows.map(r => {
     const isCur = r.key === selectedKey;
-    const sc = scoreColor(r.score);
-    const topPick = r.score===bestScore ? '<span class="recommend-badge">⭐ Top pick</span>' : '';
+    const s = r.st;
+    const sc = r.has ? scoreColor(r.score) : '#9AA3B0';
+    const topPick = r.has && r.score === bestScore && withData.length >= 2 ? '<span class="recommend-badge">⭐ Top pick</span>' : '';
+    const v = verdictFor(r.score);
+    const vPill = v==='good' ? '<span class="pill pill-g">Reliable</span>' : v==='avg' ? '<span class="pill pill-a">Mixed</span>' : v==='bad' ? '<span class="pill pill-r">High risk</span>' : '';
     return `<tr class="${isCur?'current-airline':''}">
       <td>
         <div class="airline-cell">
           <div class="airline-logo" style="background:${AIRLINE_COLORS[r.key]}">${r.al.name}</div>
           <div>
             <div class="airline-name-full">${r.al.full}${isCur?' <span style="font-size:11px;color:var(--sky);font-weight:400">(selected)</span>':''}</div>
-            <div style="margin-top:3px">${topPick}</div>
+            <div style="margin-top:3px">${topPick}${srcTag(r.key)}</div>
           </div>
         </div>
       </td>
-      <td>
+      <td>${r.has ? `
         <div class="metric-bar">
-          <div class="mini-bar-bg"><div class="mini-bar-fill" style="width:${r.ot}%;background:${scoreColor(r.ot)}"></div></div>
-          <span class="metric-val" style="color:${scoreColor(r.ot)}">${r.ot}%</span>
-          ${tag(r.ot,bestOT,worstOT,false)}
-        </div>
+          <div class="mini-bar-bg"><div class="mini-bar-fill" style="width:${s.ontimePct}%;background:${scoreColor(s.ontimePct)}"></div></div>
+          <span class="metric-val" style="color:${scoreColor(s.ontimePct)}">${s.ontimePct}%</span>
+          ${tag(s.ontimePct, bestOT, worstOT)}
+        </div>` : noData}
       </td>
-      <td><span class="metric-val" style="color:${r.s.cancel<=2?'#1FA364':r.s.cancel<=5?'#B07800':'#D63B3B'}">${r.s.cancel}%</span>${tag(r.s.cancel,bestC,worstC,true)}</td>
-      <td><span class="metric-val" style="color:${r.s.delay<=10?'#1FA364':r.s.delay<=18?'#B07800':'#D63B3B'}">${r.s.delay} min</span>${tag(r.s.delay,bestD,worstD,true)}</td>
-      <td><span class="metric-val" style="color:${r.s.baggage>=97?'#1FA364':r.s.baggage>=93?'#B07800':'#D63B3B'}">${r.s.baggage}%</span>${tag(r.s.baggage,bestB,worstB,false)}</td>
-      <td>${starsHtml(r.s.comfort)} <span style="font-size:12px;color:var(--text-muted)">${r.s.comfort.toFixed(1)}</span>${r.s.comfort===bestComf?'<span class="best-tag">BEST</span>':''}</td>
-      <td>${starsHtml(r.s.value)} <span style="font-size:12px;color:var(--text-muted)">${r.s.value.toFixed(1)}</span>${r.s.value===bestVal?'<span class="best-tag">BEST</span>':''}</td>
+      <td>${r.has ? `<span class="metric-val" style="color:${s.cancelPct<=2?'#1FA364':s.cancelPct<=5?'#B07800':'#D63B3B'}">${s.cancelPct}%</span>${tag(s.cancelPct,bestC,worstC)}` : noData}</td>
+      <td>${r.has ? `<span class="metric-val" style="color:${s.avgDelay<=10?'#1FA364':s.avgDelay<=18?'#B07800':'#D63B3B'}">${s.avgDelay} min</span>${tag(s.avgDelay,bestD,worstD)}` : noData}</td>
+      <td><span class="metric-val" style="color:${r.r.baggage>=97?'#1FA364':r.r.baggage>=93?'#B07800':'#D63B3B'}">${r.r.baggage}%</span>${tag(r.r.baggage,bestB,worstB)}</td>
+      <td>${starsHtml(r.r.comfort)} <span style="font-size:12px;color:var(--text-muted)">${r.r.comfort.toFixed(1)}</span>${r.r.comfort===bestComf?'<span class="best-tag">BEST</span>':''}</td>
+      <td>${starsHtml(r.r.value)} <span style="font-size:12px;color:var(--text-muted)">${r.r.value.toFixed(1)}</span>${r.r.value===bestVal?'<span class="best-tag">BEST</span>':''}</td>
       <td>
         <div style="display:flex;align-items:center;gap:8px">
-          <div class="score-ring-sm" style="border-color:${sc};color:${sc}">${r.score}</div>
-          <span class="pill ${r.al.verdict==='good'?'pill-g':'pill-a'}">${r.al.verdict==='good'?'Reliable':'Mixed'}</span>
+          <div class="score-ring-sm" style="border-color:${sc};color:${sc}">${r.has ? r.score : '–'}</div>
+          ${vPill}
         </div>
       </td>
     </tr>`;
@@ -513,50 +731,42 @@ function buildCompareTable(selectedKey, periodKey, grace) {
       <span><span class="best-tag">BEST</span> Best in category</span>
       <span><span class="worst-tag">WORST</span> Worst in category</span>
       <span>Traveller score = weighted blend of all KPIs</span>
+      <span>Baggage, comfort & value are editorial ratings</span>
     </div>
   </div>`;
 }
 
-// ─── MAIN RENDER ──────────────────────────────────────────────────────────────
+// ─── MAIN RENDER ─────────────────────────────────────────────────────────────
 function render() {
+  if (!FLIGHTS.length) return; // still loading
   const airlineKey  = document.getElementById('airlineSel').value;
   const routeFilter = document.getElementById('routeSel').value;
   const {from, to}  = getDateRange();
-  const periodKey   = getPeriodKey(from, to);
-  const fromLabel   = fmtDate(from);
-  const toLabel     = fmtDate(to);
+  const fromLabel = fmtDate(from), toLabel = fmtDate(to);
 
-  // "All airlines" mode — show only comparison table + combined flight log
+  // ── "All airlines" mode ──
   if (airlineKey === 'all') {
-    const allFlights = ['PIA','AS','AB','SR'].flatMap(k => DATA[k].flights)
-      .filter(f => f.date >= from && f.date <= to)
-      .sort((a,b) => b.date-a.date);
-
-    const tableRows = allFlights.slice(0,30).map(f => {
-      const al = Object.values(DATA).find(d => d.code === f.airline || DATA[f.airline.replace(/\d+/,'')]?.code === f.airline);
-      let statusHtml, delayHtml;
-      if(f.cancelled){statusHtml='<span class="pill pill-r">Cancelled</span>';delayHtml='<span class="delay-cell delay-late">—</span>';}
-      else if(f.delay===0){statusHtml='<span class="pill pill-g">On time</span>';delayHtml='<span class="delay-cell delay-none">0 min</span>';}
-      else if(f.delay<=15&&graceOn){statusHtml='<span class="pill pill-grace">Grace ≤15 min</span>';delayHtml=`<span class="delay-cell delay-grace">+${f.delay} min</span>`;}
-      else{statusHtml='<span class="pill pill-a">Delayed</span>';delayHtml=`<span class="delay-cell delay-late">+${f.delay} min</span>`;}
-      const aKey = ['PIA','AS','AB','SR'].find(k=>DATA[k].flights.includes(f)) || '?';
+    const allFlights = FLIGHTS.filter(f => f.date >= from && f.date <= to);
+    const tableRows = allFlights.slice(0, 30).map(f => {
+      const [statusHtml, delayHtml] = statusCells(f, graceOn);
       return `<tr>
         <td>${fmtDate(f.date)}</td>
-        <td class="flight-num">${f.flight}</td>
-        <td><div style="display:flex;align-items:center;gap:6px"><div style="width:8px;height:8px;border-radius:50%;background:${AIRLINE_COLORS[aKey] || '#888'}"></div>${DATA[aKey]?.name || ''}</div></td>
-        <td>${f.route}</td>
-        <td>${f.sched}</td>
+        <td class="flight-num">${esc(f.flight)}</td>
+        <td><div style="display:flex;align-items:center;gap:6px"><div style="width:8px;height:8px;border-radius:50%;background:${AIRLINE_COLORS[f.airline]}"></div>${AIRLINES[f.airline].name}</div></td>
+        <td>${esc(f.route)}</td>
+        <td>${esc(f.sched)}</td>
         <td>${delayHtml}</td>
         <td>${statusHtml}</td>
       </tr>`;
     }).join('');
 
     document.getElementById('mainContent').innerHTML = `
+      ${dataBanner()}
       <div class="section-hdr">
         <h2>All airlines comparison</h2>
         <span>${fromLabel} — ${toLabel}</span>
       </div>
-      ${buildCompareTable('all', periodKey, graceOn)}
+      ${buildCompareTable('all', from, to, graceOn)}
       <div class="log-card">
         <div class="log-head">
           <h3>Combined flight log — all airlines</h3>
@@ -573,59 +783,52 @@ function render() {
         <div class="cta-strip-text"><strong>Is that cheaper ticket actually cheaper?</strong><span>Factor in delays, hotel stays from cancellations, and lost time.</span></div>
         <button class="btn-cta">Calculate real cost →</button>
       </div>`;
-    if(trendChart){trendChart.destroy();trendChart=null;}
-    // make compare rows clickable
+    if (trendChart) { trendChart.destroy(); trendChart = null; }
     bindCompareRows();
     return;
   }
 
-  // ─── Single airline mode ───────────────────────────────────────────────────
-  const d = DATA[airlineKey];
-  const s = d.stats;
-  const ontime = graceOn ? s.ontimeG : s.ontime;
-  const reliability = Math.max(0,Math.min(100,Math.round((ontime*0.5)+((100-s.cancel*5)*0.3)+((100-Math.min(s.delay,30)/30*100)*0.2))));
-  const ringColor = scoreColor(reliability);
+  // ── Single airline mode ──
+  const d = AIRLINES[airlineKey];
+  const r = d.ratings;
+  const flights = flightsFor(airlineKey, from, to, routeFilter);
+  const st = computeStats(flights, graceOn);
+  const reliability = reliabilityScore(st);
+  const hasData = reliability != null;
+  const verdict = verdictFor(reliability);
+  const ringColor = hasData ? scoreColor(reliability) : '#9AA3B0';
   const circ = 2*Math.PI*46;
-  const dashOff = circ-(reliability/100)*circ;
-  const [vLabel,vClass] = {good:['✓ Reliable choice','badge-good'],avg:['⚠ Mixed reliability','badge-avg'],bad:['✗ High risk','badge-bad']}[d.verdict];
+  const dashOff = circ - ((reliability || 0)/100)*circ;
+  const [vLabel, vClass] = {
+    good:['✓ Reliable choice','badge-good'], avg:['⚠ Mixed reliability','badge-avg'],
+    bad:['✗ High risk','badge-bad'], none:['No flights in this period','badge-avg']
+  }[verdict];
   const verdictText = {
-    good:`${d.name} is a solid pick. On-time performance is strong and cancellations are rare.`,
-    avg:`${d.name} is affordable but comes with trade-offs. Delays average ${s.delay} mins and cancellation rates are above norm. Build buffer time into your plans.`,
-    bad:`${d.name} has below-average reliability. Consider alternatives or buy refundable tickets only.`
-  }[d.verdict];
+    good:`${d.name} is a solid pick. ${st.ontimePct}% of flights left on time and cancellations are rare (${st.cancelPct}%).`,
+    avg:`${d.name} is affordable but comes with trade-offs. Late flights averaged ${st.avgDelay} mins and ${st.cancelPct}% were cancelled. Build buffer time into your plans.`,
+    bad:`${d.name} has below-average reliability in this period (${st.ontimePct}% on time, ${st.cancelPct}% cancelled). Consider alternatives or buy refundable tickets only.`,
+    none:`No tracked ${d.name} flights match this date range${routeFilter!=='all'?' and route':''}. Try a longer period or "All routes".`
+  }[verdict];
+  const isLive = SOURCE[airlineKey] === 'live';
 
-  // Filter flights by date + route
-  let flights = d.flights.filter(f => f.date >= from && f.date <= to);
-  if(routeFilter!=='all') flights = flights.filter(f=>f.route===routeFilter);
+  const routes = routeBreakdown(flightsFor(airlineKey, from, to, 'all'), graceOn);
+  const routeSt = routeFilter !== 'all' ? st : null;
+  const tips = buildTips(airlineKey, flightsFor(airlineKey, from, to, 'all'), graceOn);
+  const kpi = (v, fmt) => hasData ? fmt(v) : '—';
 
-  const cancelCount = flights.filter(f=>f.cancelled).length;
-  const graceCount  = graceOn ? flights.filter(f=>!f.cancelled&&f.delay>0&&f.delay<=15).length : 0;
-
-  // Route on-time for selected route
-  let routeOTpct = null;
-  if(routeFilter!=='all'){
-    const ri = d.routes.indexOf(routeFilter);
-    if(ri>0) routeOTpct = graceOn ? d.routeGrace[ri] : d.routeOT[ri];
-  }
-
-  const tableRows = flights.slice(0,25).map(f => {
-    let statusHtml, delayHtml;
-    if(f.cancelled){statusHtml='<span class="pill pill-r">Cancelled</span>';delayHtml='<span class="delay-cell delay-late">—</span>';}
-    else if(f.delay===0){statusHtml='<span class="pill pill-g">On time</span>';delayHtml='<span class="delay-cell delay-none">0 min</span>';}
-    else if(f.delay<=15&&graceOn){statusHtml='<span class="pill pill-grace">Grace ≤15 min</span>';delayHtml=`<span class="delay-cell delay-grace">+${f.delay} min</span>`;}
-    else{statusHtml='<span class="pill pill-a">Delayed</span>';delayHtml=`<span class="delay-cell delay-late">+${f.delay} min</span>`;}
-    return `<tr><td>${fmtDate(f.date)}</td><td class="flight-num">${f.flight}</td><td>${f.route}</td><td>${f.sched}</td><td>${delayHtml}</td><td>${statusHtml}</td></tr>`;
+  const tableRows = flights.slice(0, 25).map(f => {
+    const [statusHtml, delayHtml] = statusCells(f, graceOn);
+    return `<tr><td>${fmtDate(f.date)}</td><td class="flight-num">${esc(f.flight)}</td><td>${esc(f.route)}</td><td>${esc(f.sched)}</td><td>${delayHtml}</td><td>${statusHtml}</td></tr>`;
   }).join('');
 
   document.getElementById('mainContent').innerHTML = `
-
+  ${dataBanner()}
   <div class="section-hdr">
-    <h2>${d.full} — reliability report</h2>
-    <span>${fromLabel} — ${toLabel} · ${flights.length} flights tracked</span>
+    <h2>${d.full} — reliability report ${srcTag(airlineKey)}</h2>
+    <span>${fromLabel} — ${toLabel} · ${st.total} flights tracked</span>
   </div>
 
-  <!-- COMPARISON TABLE FIRST -->
-  ${buildCompareTable(airlineKey, periodKey, graceOn)}
+  ${buildCompareTable(airlineKey, from, to, graceOn)}
 
   <!-- VERDICT + SCORE -->
   <div class="verdict-hero">
@@ -637,7 +840,7 @@ function render() {
             stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${dashOff.toFixed(1)}"
             stroke-linecap="round" transform="rotate(-90 55 55)"/>
         </svg>
-        <div class="score-num">${reliability}</div>
+        <div class="score-num">${hasData ? reliability : '–'}</div>
       </div>
       <div class="score-lbl">reliability score</div>
     </div>
@@ -645,9 +848,9 @@ function render() {
       <div class="verdict-badge ${vClass}">${vLabel}</div>
       <div class="verdict-name">${d.full}</div>
       <div class="verdict-desc">${verdictText}</div>
-      ${routeFilter!=='all'?`<div class="grace-notice">📍 Route ${routeFilter} — on-time: <strong>${routeOTpct}%</strong></div>`:''}
-      ${graceOn?`<div class="grace-notice">⏱ Grace active — ${graceCount} flight${graceCount!==1?'s':''} within 15 min counted as on-time</div>`:''}
-      <div class="verdict-meta">📅 ${fromLabel} – ${toLabel} · Updated daily</div>
+      ${routeSt && hasData ? `<div class="grace-notice">📍 Route ${esc(routeFilter)} — on-time: <strong>${routeSt.ontimePct}%</strong></div>` : ''}
+      ${graceOn && hasData ? `<div class="grace-notice">⏱ Grace active — ${st.graceCount} flight${st.graceCount!==1?'s':''} within 15 min counted as on-time</div>` : ''}
+      <div class="verdict-meta">📅 ${fromLabel} – ${toLabel} · ${isLive ? `Live data${META && META.updated_at ? ', updated ' + timeAgo(META.updated_at) : ''}` : 'Sample data'}</div>
     </div>
   </div>
 
@@ -656,38 +859,38 @@ function render() {
     <div class="kpi-card">
       <div class="kpi-icon">🕐</div>
       <div class="kpi-label">On-time${graceOn?' (w/grace)':''}</div>
-      <div class="kpi-value ${ontime>=80?'kpi-good':ontime>=65?'kpi-avg':'kpi-bad'}">${ontime}%</div>
-      <div class="kpi-bench">${graceOn?`Without grace: ${s.ontime}%`:'Domestic avg: 76%'}</div>
+      <div class="kpi-value ${!hasData?'':st.ontimePct>=80?'kpi-good':st.ontimePct>=65?'kpi-avg':'kpi-bad'}">${kpi(st.ontimePct, v=>v+'%')}</div>
+      <div class="kpi-bench">${graceOn && hasData ? `Without grace: ${st.ontimeRawPct}%` : 'Departed within schedule'}</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-icon">❌</div>
       <div class="kpi-label">Cancellation rate</div>
-      <div class="kpi-value ${s.cancel<=2?'kpi-good':s.cancel<=5?'kpi-avg':'kpi-bad'}">${s.cancel}%</div>
-      <div class="kpi-bench">${cancelCount} cancellation${cancelCount!==1?'s':''} in period</div>
+      <div class="kpi-value ${!hasData?'':st.cancelPct<=2?'kpi-good':st.cancelPct<=5?'kpi-avg':'kpi-bad'}">${kpi(st.cancelPct, v=>v+'%')}</div>
+      <div class="kpi-bench">${st.cancelled} cancellation${st.cancelled!==1?'s':''} in period</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-icon">⏳</div>
       <div class="kpi-label">Avg delay if late</div>
-      <div class="kpi-value ${s.delay<=10?'kpi-good':s.delay<=18?'kpi-avg':'kpi-bad'}">${s.delay} min</div>
+      <div class="kpi-value ${!hasData?'':st.avgDelay<=10?'kpi-good':st.avgDelay<=18?'kpi-avg':'kpi-bad'}">${kpi(st.avgDelay, v=>v+' min')}</div>
       <div class="kpi-bench">Grace cutoff: 15 min</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-icon">🧳</div>
       <div class="kpi-label">Baggage success</div>
-      <div class="kpi-value ${s.baggage>=97?'kpi-good':s.baggage>=93?'kpi-avg':'kpi-bad'}">${s.baggage}%</div>
-      <div class="kpi-bench">No lost or delayed bags</div>
+      <div class="kpi-value ${r.baggage>=97?'kpi-good':r.baggage>=93?'kpi-avg':'kpi-bad'}">${r.baggage}%</div>
+      <div class="kpi-bench">Editorial rating</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-icon">💺</div>
       <div class="kpi-label">Comfort rating</div>
-      <div class="kpi-value">${s.comfort.toFixed(1)}<span style="font-size:14px;color:var(--text-muted)">/5</span></div>
-      <div class="kpi-bench">${starsHtml(s.comfort)}</div>
+      <div class="kpi-value">${r.comfort.toFixed(1)}<span style="font-size:14px;color:var(--text-muted)">/5</span></div>
+      <div class="kpi-bench">${starsHtml(r.comfort)}</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-icon">💰</div>
       <div class="kpi-label">Value for money</div>
-      <div class="kpi-value">${s.value.toFixed(1)}<span style="font-size:14px;color:var(--text-muted)">/5</span></div>
-      <div class="kpi-bench">${starsHtml(s.value)}</div>
+      <div class="kpi-value">${r.value.toFixed(1)}<span style="font-size:14px;color:var(--text-muted)">/5</span></div>
+      <div class="kpi-bench">${starsHtml(r.value)}</div>
     </div>
   </div>
 
@@ -695,19 +898,18 @@ function render() {
   <div class="two-col">
     <div class="card">
       <div class="card-title">On-time % by route${graceOn?' (w/ grace)':''}</div>
-      ${d.routes.slice(1).map((r,i)=>{
-        const pct=graceOn?d.routeGrace[i+1]:d.routeOT[i+1];
-        const isActive=routeFilter===r;
-        return `<div class="route-row ${isActive?'active-route':''}" onclick="filterRoute('${r}')">
-          <span class="route-name">${r}</span>
-          <div class="route-bg"><div class="route-fill" style="width:${pct}%;background:${scoreColor(pct)}"></div></div>
-          <span class="route-pct">${pct}%</span>
+      ${routes.length ? routes.map(rt => {
+        const isActive = routeFilter === rt.route;
+        return `<div class="route-row ${isActive?'active-route':''}" onclick="filterRoute('${esc(rt.route)}')" title="${rt.n} flights">
+          <span class="route-name">${esc(rt.route)}</span>
+          <div class="route-bg"><div class="route-fill" style="width:${rt.pct}%;background:${scoreColor(rt.pct)}"></div></div>
+          <span class="route-pct">${rt.pct}%</span>
         </div>`;
-      }).join('')}
+      }).join('') : '<div style="font-size:13px;color:var(--text-faint)">No route data in this period</div>'}
       <div style="font-size:11px;color:var(--text-faint);margin-top:10px">Click a route to filter the flight log</div>
     </div>
     <div class="card">
-      <div class="card-title">On-time trend — 12 weeks</div>
+      <div class="card-title">On-time trend — 12 weeks${routeFilter!=='all' ? ' · ' + esc(routeFilter) : ''}</div>
       <div class="chart-wrap">
         <canvas id="trendChart" role="img" aria-label="Weekly on-time percentage trend">Trend data.</canvas>
       </div>
@@ -717,14 +919,14 @@ function render() {
   <!-- TIPS -->
   <div class="tips-card">
     <div class="tips-title">✈ Traveller tips for ${d.name}</div>
-    ${d.tips.map(t=>`<div class="tip-row"><div class="tip-dot"></div><div class="tip-text">${t}</div></div>`).join('')}
+    ${tips.map(t => `<div class="tip-row"><div class="tip-dot"></div><div class="tip-text">${esc(t)}</div></div>`).join('')}
   </div>
 
   <!-- FLIGHT LOG -->
   <div class="log-card">
     <div class="log-head">
       <h3>Flight log — ${d.name}</h3>
-      <span class="log-filter-note">${routeFilter==='all'?'All routes':'Route: '+routeFilter} · ${flights.length} flights · ${fromLabel} – ${toLabel}</span>
+      <span class="log-filter-note">${routeFilter==='all'?'All routes':'Route: '+esc(routeFilter)} · ${flights.length} flights · ${fromLabel} – ${toLabel}</span>
     </div>
     <div style="overflow-x:auto">
       <table>
@@ -743,40 +945,45 @@ function render() {
   </div>`;
 
   // Trend chart
-  if(trendChart) trendChart.destroy();
-  const tData = graceOn ? d.trendG : d.trend;
-  trendChart = new Chart(document.getElementById('trendChart'),{
-    type:'line',
-    data:{
-      labels:['W1','W2','W3','W4','W5','W6','W7','W8','W9','W10','W11','W12'],
-      datasets:[{label:'On-time %',data:tData,borderColor:ringColor,backgroundColor:ringColor+'18',fill:true,borderWidth:2.5,pointRadius:3,pointBackgroundColor:ringColor,tension:0.35}]
-    },
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{y:{min:40,max:100,ticks:{font:{size:11},callback:v=>v+'%'},grid:{color:'rgba(0,0,0,0.05)'}},x:{ticks:{font:{size:10}},grid:{display:false}}}}
-  });
+  if (trendChart) trendChart.destroy();
+  if (window.Chart) {
+    const t = weeklyTrend(airlineKey, routeFilter, graceOn);
+    const vals = t.data.filter(v => v != null);
+    trendChart = new Chart(document.getElementById('trendChart'), {
+      type:'line',
+      data:{ labels:t.labels, datasets:[{label:'On-time %', data:t.data, borderColor:ringColor, backgroundColor:ringColor+'18', fill:true, borderWidth:2.5, pointRadius:3, pointBackgroundColor:ringColor, tension:0.35, spanGaps:true}] },
+      options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+        scales:{ y:{min: vals.length ? Math.min(40, Math.floor(Math.min(...vals)/10)*10) : 40, max:100, ticks:{font:{size:11}, callback:v=>v+'%'}, grid:{color:'rgba(0,0,0,0.05)'}},
+                 x:{ticks:{font:{size:10}}, grid:{display:false}} }}
+    });
+  }
 
   bindCompareRows();
 }
 
 function bindCompareRows() {
   const body = document.getElementById('compareBody');
-  if(!body) return;
-  const keys = ['PIA','AS','AB','SR'];
-  body.querySelectorAll('tr').forEach((tr,i) => {
+  if (!body) return;
+  body.querySelectorAll('tr').forEach((tr, i) => {
     tr.onclick = () => {
       const sel = document.getElementById('airlineSel');
-      const k = keys[i];
-      if(sel.value === k) { sel.value='all'; }
-      else { sel.value = k; }
+      sel.value = sel.value === KEYS[i] ? 'all' : KEYS[i];
       onAirlineChange();
     };
   });
 }
 
-// ─── INIT ─────────────────────────────────────────────────────────────────────
-initDates();
-updateRoutes();
-render();
+// ─── INIT ────────────────────────────────────────────────────────────────────
+(async function init() {
+  initDates();
+  await loadData();
+  const allLive = KEYS.every(k => SOURCE[k] === 'live');
+  document.getElementById('footerNote').textContent = allLive || KEYS.some(k => SOURCE[k] === 'live')
+    ? 'Live flight data via Aviationstack, refreshed every 2 days. On-time = departure vs schedule.'
+    : 'Showing sample data until the live flight feed has collected enough flights.';
+  updateRoutes();
+  render();
+})();
 </script>
 </body>
 </html>
