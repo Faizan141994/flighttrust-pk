@@ -15,7 +15,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 const KEY = process.env.AVIATIONSTACK_KEY;
-const BASE = (process.env.AVIATIONSTACK_BASE || 'https://api.aviationstack.com/v1').replace(/\/$/, '');
+const BASE = (process.env.AVIATIONSTACK_BASE || 'https://api.apilayer.net/aviationstack/v1').replace(/\/$/, '');
 const MAX_CALLS = Number(process.env.MAX_CALLS_PER_MONTH || 92);
 const KEEP_DAYS = Number(process.env.KEEP_DAYS || 120);
 const OUT = process.env.OUTPUT_FILE || 'data/flights.json';
